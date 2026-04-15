@@ -104,7 +104,19 @@ Keywords and recent sentences are embedded in the system prompt (not as separate
 
 ### LLM Configuration
 
-Supports multiple LLM endpoint configurations. Each endpoint has: `id`, `name`, `endpoint` (URL), `apiKey`, `model`. Stored as `llmEndpoints` array in `chrome.storage.local`. One endpoint is marked as active via `activeEndpointId`. Auto-generates name as "model @ domain". Legacy single-config (`llmEndpoint`/`llmApiKey`/`llmModel`) is auto-migrated to the new array format. Works with OpenAI, DeepSeek, Ollama, vLLM, LM Studio, etc.
+Supports multiple LLM endpoint configurations. Each endpoint has: `id`, `name`, `endpoint` (URL), `apiKey`, `model`. Stored as `llmEndpoints` array in `chrome.storage.local`. One endpoint is marked as active via `activeEndpointId`. Auto-generates name as "model @ domain". Legacy single-config (`llmEndpoint`/`llmApiKey`/`llmModel`) is auto-migrated to the new array format. Works with OpenAI, DeepSeek, Ollama, vLLM, LM Studio, etc. Options page provides a popup-style endpoint selector with search filtering.
+
+### Usage Statistics
+
+- Per-day totals stored as `usage_YYYY-MM-DD` in `chrome.storage.local`
+- Per-model-per-day stored as separate keys `usage_YYYY-MM-DD:modelName`
+- Daily totals: `{ count, inputChars, outputChars, quickCount, agentCount, deepCount }`
+- Per-model data: `{ count, inputChars, outputChars, endpoint }`
+- `inputChars` includes both user text AND system prompt characters (for accurate token estimation)
+- Each model has its own storage key — switching models never causes data loss or overwrites
+- `recordUsage` uses callback-based storage API (not async/await) to avoid race conditions
+- Legacy data (old single-key format with `llmModel`/`llmEndpoint` or embedded `models` dict) is auto-migrated on first read by `getUsageStats`
+- Endpoint testing measures response latency with color-coded indicators (green <2s, orange <5s, red ≥5s)
 
 ### Content Script Isolation
 

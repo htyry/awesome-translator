@@ -175,8 +175,9 @@ chrome.runtime.onConnect.addListener(port => {
       // Record source sentence (not the full translation — saves tokens)
       const shouldUpdate = await contextManager.addSentence(tabId, detected, text);
 
-      // Record usage
-      recordUsage(mode, text.length, full.length);
+      // Record usage — include system prompt chars for accurate token estimation
+      const systemPromptChars = messages[0]?.content?.length || 0;
+      recordUsage(mode, text.length, full.length, systemPromptChars);
 
       // Send shared keywords to frontend for display
       const currentKeywords = await contextManager.getKeywords(tabId);
@@ -236,38 +237,162 @@ async function updateKeywords(tabId, force = false, targetLang = 'zh') {
 }
 
 // ─── API Usage Tracking ───
-async function recordUsage(mode, inputChars, outputChars) {
+// Per-day totals key: usage_YYYY-MM-DD -> { count, inputChars, outputChars, quickCount, agentCount, deepCount }
+// Per-model-per-day key: usage_YYYY-MM-DD:modelName -> { count, inputChars, outputChars, endpoint }
+// This eliminates read-modify-write races between different models.
+
+function usageKey(date) { return `usage_${date}`; }
+function modelUsageKey(date, model) { return `usage_${date}:${model}`; }
+
+function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0) {
   const today = new Date().toISOString().slice(0, 10);
-  const key = `usage_${today}`;
-  const result = await chrome.storage.local.get(key);
-  const data = result[key] || {
-    count: 0, inputChars: 0, outputChars: 0,
-    quickCount: 0, agentCount: 0, deepCount: 0,
-    llmModel: '', llmEndpoint: '',
-  };
-  data.count++;
-  data.inputChars += inputChars;
-  data.outputChars += outputChars;
-  if (mode === 'quick') data.quickCount++;
-  else if (mode === 'agent') data.agentCount++;
-  else if (mode === 'deep') data.deepCount++;
+  const totalInputChars = inputChars + (mode !== 'quick' ? systemPromptChars : 0);
 
-  if (mode !== 'quick' && llmClient) {
-    const cfg = llmClient.getConfig();
-    data.llmModel = cfg.model || '';
-    data.llmEndpoint = cfg.endpoint || '';
+  // Update daily totals (read-modify-write, but each field is additive so safe)
+  const dayKey = usageKey(today);
+  chrome.storage.local.get(dayKey, (result) => {
+    const data = result[dayKey] || {
+      count: 0, inputChars: 0, outputChars: 0,
+      quickCount: 0, agentCount: 0, deepCount: 0,
+    };
+    data.count++;
+    data.inputChars += totalInputChars;
+    data.outputChars += outputChars;
+    if (mode === 'quick') data.quickCount++;
+    else if (mode === 'agent') data.agentCount++;
+    else if (mode === 'deep') data.deepCount++;
+    // Strip legacy fields to keep daily key clean
+    delete data.models;
+    delete data.llmModel;
+    delete data.llmEndpoint;
+    chrome.storage.local.set({ [dayKey]: data });
+  });
+
+  // Update per-model stats (separate key per model — no cross-model race)
+  if (mode !== 'quick') {
+    let modelName = 'unknown';
+    let endpointUrl = '';
+    if (llmClient) {
+      const cfg = llmClient.getConfig();
+      modelName = cfg.model || 'unknown';
+      endpointUrl = cfg.endpoint || '';
+    }
+
+    const mKey = modelUsageKey(today, modelName);
+    chrome.storage.local.get(mKey, (result) => {
+      const mData = result[mKey] || { count: 0, inputChars: 0, outputChars: 0, endpoint: endpointUrl };
+      mData.count++;
+      mData.inputChars += totalInputChars;
+      mData.outputChars += outputChars;
+      if (endpointUrl && !mData.endpoint) mData.endpoint = endpointUrl;
+      chrome.storage.local.set({ [mKey]: mData });
+    });
   }
-
-  await chrome.storage.local.set({ [key]: data });
 }
 
 async function getUsageStats() {
   const all = await chrome.storage.local.get(null);
-  const stats = [];
+  const dayMap = {};     // { date: { count, inputChars, outputChars, quickCount, agentCount, deepCount } }
+  const modelDayMap = {}; // { date: { modelName: { count, inputChars, outputChars, endpoint } } }
+  const legacyDates = new Set(); // Track dates that had legacy fields
+
   for (const key of Object.keys(all)) {
     if (!key.startsWith('usage_')) continue;
-    const date = key.slice(5);
-    stats.push({ date, ...all[key] });
+    const val = all[key];
+
+    // Match daily totals: usage_YYYY-MM-DD (no colon)
+    const dayMatch = key.match(/^usage_(\d{4}-\d{2}-\d{2})$/);
+    if (dayMatch) {
+      const date = dayMatch[1];
+      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0 };
+      dayMap[date].count += val.count || 0;
+      dayMap[date].inputChars += val.inputChars || 0;
+      dayMap[date].outputChars += val.outputChars || 0;
+      dayMap[date].quickCount += val.quickCount || 0;
+      dayMap[date].agentCount += val.agentCount || 0;
+      dayMap[date].deepCount += val.deepCount || 0;
+
+      // Mark dates with legacy fields for later cleanup
+      if (val.models || val.llmModel) {
+        legacyDates.add(date);
+      }
+      continue;
+    }
+
+    // Match per-model: usage_YYYY-MM-DD:modelName
+    const modelMatch = key.match(/^usage_(\d{4}-\d{2}-\d{2}):(.+)$/);
+    if (modelMatch) {
+      const date = modelMatch[1];
+      const modelName = modelMatch[2];
+      if (!modelDayMap[date]) modelDayMap[date] = {};
+      modelDayMap[date][modelName] = val;
+      continue;
+    }
+  }
+
+  // Build per-model keys from legacy daily data (only if per-model key doesn't exist)
+  const toWrite = {};
+  const toClean = {};
+  for (const date of legacyDates) {
+    const dayKey = usageKey(date);
+    const dayVal = all[dayKey];
+    if (!dayVal) continue;
+
+    // Extract legacy models
+    if (dayVal.models && typeof dayVal.models === 'object') {
+      if (!modelDayMap[date]) modelDayMap[date] = {};
+      for (const [mName, mData] of Object.entries(dayVal.models)) {
+        const mKey = modelUsageKey(date, mName);
+        if (!all[mKey] && !toWrite[mKey]) {
+          // Only use legacy data if no per-model key exists yet
+          modelDayMap[date][mName] = mData;
+          toWrite[mKey] = mData;
+        }
+      }
+    }
+
+    // Extract legacy llmModel/llmEndpoint
+    if (dayVal.llmModel && !dayVal.models) {
+      if (!modelDayMap[date]) modelDayMap[date] = {};
+      const mName = dayVal.llmModel;
+      const mKey = modelUsageKey(date, mName);
+      if (!all[mKey] && !toWrite[mKey] && !modelDayMap[date][mName]) {
+        modelDayMap[date][mName] = {
+          count: (dayVal.agentCount || 0) + (dayVal.deepCount || 0),
+          inputChars: dayVal.inputChars || 0,
+          outputChars: dayVal.outputChars || 0,
+          endpoint: dayVal.llmEndpoint || '',
+        };
+        toWrite[mKey] = modelDayMap[date][mName];
+      }
+    }
+
+    // Clean legacy fields from daily key
+    toClean[dayKey] = {
+      count: dayVal.count || 0,
+      inputChars: dayVal.inputChars || 0,
+      outputChars: dayVal.outputChars || 0,
+      quickCount: dayVal.quickCount || 0,
+      agentCount: dayVal.agentCount || 0,
+      deepCount: dayVal.deepCount || 0,
+    };
+  }
+
+  // Persist migrated per-model keys and cleaned daily keys
+  if (Object.keys(toWrite).length) {
+    await chrome.storage.local.set(toWrite);
+  }
+  if (Object.keys(toClean).length) {
+    await chrome.storage.local.set(toClean);
+  }
+
+  // Merge into final stats array
+  const dates = new Set([...Object.keys(dayMap), ...Object.keys(modelDayMap)]);
+  const stats = [];
+  for (const date of dates) {
+    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0 };
+    const models = modelDayMap[date] || {};
+    stats.push({ date, ...day, models });
   }
   stats.sort((a, b) => b.date.localeCompare(a.date));
   return stats;
