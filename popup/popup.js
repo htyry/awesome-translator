@@ -39,9 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isTranslating) return;
       currentMode = tab.dataset.mode;
       modeTabs.forEach(t => t.classList.toggle('active', t === tab));
-      // Show/hide intent row and keywords bar
+      // Show/hide intent row
       intentRow.classList.toggle('hidden', currentMode === 'quick');
-      keywordsBar.classList.toggle('hidden', currentMode === 'quick');
 
       // Show cached result if available, otherwise clear
       if (modeResults[currentMode]) {
@@ -238,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatContent(text) {
-    return text
+    let html = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -246,6 +245,24 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/^### (.+)$/gm, '<div class="popup-h3">$1</div>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\n/g, '<br>');
+
+    // Render **Terms** section as a styled card
+    html = html.replace(
+      /(<strong>Terms<\/strong><br>)([\s\S]*?)(?=<br><br>|<br><strong>|$)/,
+      (_, header, body) => {
+        const items = body
+          .split(/<br>\s*/)
+          .map(line => line.trim())
+          .filter(line => line && /^\d+\./.test(line))
+          .map(line => `<div class="term-item">${line.replace(/^\d+\.\s*/, '')}</div>`)
+          .join('');
+        return items
+          ? `${header}<div class="terms-card">${items}</div>`
+          : header;
+      }
+    );
+
+    return html;
   }
 
   function escapeHtml(text) {
@@ -265,8 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
     keywordsBar.innerHTML = `<span class="keywords-label">Domain</span>${tagsHtml}`;
     keywordsBar.querySelectorAll('.keyword-tag').forEach(tag => {
       tag.addEventListener('click', () => {
-        if (!currentIntent) return;
-        chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', intent: currentIntent, keyword: tag.dataset.keyword }, resp => {
+        chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', keyword: tag.dataset.keyword }, resp => {
           if (resp?.success && resp.data?.keywords) updateKeywordsDisplay(resp.data.keywords);
         });
       });
@@ -315,7 +331,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Intent row visibility
       intentRow.classList.toggle('hidden', initialMode === 'quick');
-      keywordsBar.classList.toggle('hidden', initialMode === 'quick');
 
       // Intent mode: auto → badge, manual → switch
       if (settings.intentMode === 'manual') {

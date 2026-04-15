@@ -118,7 +118,7 @@ chrome.runtime.onConnect.addListener(port => {
       Object.keys(customPrompts).forEach(k => { if (!customPrompts[k]) delete customPrompts[k]; });
 
       const [keywords, sentences] = await Promise.all([
-        contextManager.getKeywords(tabId, detected),
+        contextManager.getKeywords(tabId),
         contextManager.getSentences(tabId, detected, limit),
       ]);
 
@@ -140,13 +140,13 @@ chrome.runtime.onConnect.addListener(port => {
       // Record usage
       recordUsage(mode, text.length, full.length);
 
-      // Send keywords to frontend for display
-      const currentKeywords = await contextManager.getKeywords(tabId, detected);
+      // Send shared keywords to frontend for display
+      const currentKeywords = await contextManager.getKeywords(tabId);
       port.postMessage({ type: 'done', content: full, keywords: currentKeywords });
 
-      // Background keyword update (non-blocking)
+      // Background keyword update (non-blocking, uses all sentences across intents)
       if (shouldUpdate && llmClient) {
-        updateKeywords(tabId, detected).catch(() => {});
+        updateKeywords(tabId).catch(() => {});
       }
     } catch (e) {
       if (e.name !== 'AbortError') {
@@ -157,12 +157,12 @@ chrome.runtime.onConnect.addListener(port => {
 });
 
 // ─── Keyword extraction (background, non-blocking) ───
-async function updateKeywords(tabId, intent) {
+async function updateKeywords(tabId) {
   if (!llmClient) return;
 
   const [sentences, existingKeywords] = await Promise.all([
-    contextManager.getSentences(tabId, intent, 20),
-    contextManager.getKeywords(tabId, intent),
+    contextManager.getAllSentences(tabId, 20),
+    contextManager.getKeywords(tabId),
   ]);
 
   if (sentences.length < 3) return;
@@ -181,11 +181,11 @@ async function updateKeywords(tabId, intent) {
     if (Array.isArray(keywords) && keywords.length > 0) {
       // Clean up: ensure strings only
       keywords = keywords.filter(k => typeof k === 'string').slice(0, 5);
-      await contextManager.updateKeywords(tabId, intent, keywords);
+      await contextManager.updateKeywords(tabId, keywords);
 
-      // Notify content script about keyword update
+      // Notify content script about keyword update (shared, no intent)
       try {
-        chrome.tabs.sendMessage(tabId, { type: 'KEYWORDS_UPDATED', intent, keywords });
+        chrome.tabs.sendMessage(tabId, { type: 'KEYWORDS_UPDATED', keywords });
       } catch {}
     }
   } catch (e) {
@@ -285,8 +285,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'PROMOTE_KEYWORD': {
       const tid = _sender.tab?.id;
       if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
-      const { intent, keyword } = message;
-      contextManager.promoteKeyword(tid, intent, keyword)
+      const { keyword } = message;
+      contextManager.promoteKeyword(tid, keyword)
         .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
         .catch(e => sendResponse({ success: false, error: e.message }));
       return true;
@@ -295,8 +295,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'GET_KEYWORDS': {
       const tid = _sender.tab?.id;
       if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
-      const { intent: kwIntent } = message;
-      contextManager.getKeywords(tid, kwIntent)
+      contextManager.getKeywords(tid)
         .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
         .catch(e => sendResponse({ success: false, error: e.message }));
       return true;

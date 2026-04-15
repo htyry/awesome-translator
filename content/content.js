@@ -114,7 +114,7 @@
         break;
       }
       case 'KEYWORDS_UPDATED': {
-        if (msg.intent === currentIntent) updateKeywordsDisplay(msg.keywords);
+        updateKeywordsDisplay(msg.keywords);
         send({ success: true });
         break;
       }
@@ -249,7 +249,7 @@
       </div>
       <div class="at-mode-tabs">${modeTabs}</div>
       <div class="at-intent-row ${currentMode === MODES.QUICK ? 'at-hidden' : ''}">${intentRow}</div>
-      <div class="at-keywords-bar ${currentMode === MODES.QUICK ? 'at-hidden' : ''}" id="atKeywordsBar">
+      <div class="at-keywords-bar" id="atKeywordsBar">
         <span class="at-keywords-label">Domain</span>
         <span class="at-keywords-empty">translating...</span>
       </div>
@@ -312,8 +312,8 @@
   }
 
   function promoteKeyword(keyword) {
-    if (!currentIntent || !keyword) return;
-    chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', intent: currentIntent, keyword }, resp => {
+    if (!keyword) return;
+    chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', keyword }, resp => {
       if (resp?.success && resp.data?.keywords) {
         updateKeywordsDisplay(resp.data.keywords);
       }
@@ -327,7 +327,6 @@
       t.classList.toggle('at-active', t.dataset.mode === mode)
     );
     panel.querySelector('.at-intent-row')?.classList.toggle('at-hidden', mode === MODES.QUICK);
-    panel.querySelector('#atKeywordsBar')?.classList.toggle('at-hidden', mode === MODES.QUICK);
 
     const resultEl = panel.querySelector('.at-result');
 
@@ -460,9 +459,9 @@
     if (port) { try { port.disconnect(); } catch {} port = null; }
   }
 
-  // ─── Format content (basic markdown) ───
+  // ─── Format content (markdown + Terms section) ───
   function formatContent(text) {
-    return text
+    let html = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -470,6 +469,24 @@
       .replace(/^### (.+)$/gm, '<div class="at-h3">$1</div>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\n/g, '<br>');
+
+    // Render **Terms** section as a styled card
+    html = html.replace(
+      /(<strong>Terms<\/strong><br>)([\s\S]*?)(?=<br><br>|<br><strong>|$)/,
+      (_, header, body) => {
+        const items = body
+          .split(/<br>\s*/)
+          .map(line => line.trim())
+          .filter(line => line && line.startsWith('1.') || line.startsWith('2.') || line.startsWith('3.') || line.startsWith('4.') || line.startsWith('5.'))
+          .map(line => `<div class="at-term-item">${line.replace(/^\d+\.\s*/, '')}</div>`)
+          .join('');
+        return items
+          ? `${header}<div class="at-terms-card">${items}</div>`
+          : header;
+      }
+    );
+
+    return html;
   }
 
   // ════════════════════════════════════════

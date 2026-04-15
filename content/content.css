@@ -169,6 +169,26 @@
   font-size: 12.5px;
 }
 
+/* ─── Terms Card ─── */
+.at-terms-card {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #f8f9fa;
+  border-left: 3px solid #4a7dff;
+  border-radius: 0 6px 6px 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+
+.at-term-item {
+  padding: 2px 0;
+  color: #444;
+}
+
+.at-term-item + .at-term-item {
+  border-top: 1px solid #eee;
+}
+
 /* ─── Actions Bar ─── */
 .at-panel-actions {
   display: flex;
