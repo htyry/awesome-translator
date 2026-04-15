@@ -167,12 +167,21 @@
       <h2 class="section-title">LLM Configuration</h2>
       <p class="section-note">Manage multiple LLM endpoints. Select the active one for translation.</p>
 
-      <!-- Endpoint list -->
+      <!-- Endpoint selector (click to show popup) -->
       <div class="option-item">
         <label>Active Endpoint</label>
-        <select id="activeEndpointSelect">
-          <option value="">No endpoints configured</option>
-        </select>
+        <button id="endpointSelectorBtn" class="endpoint-selector-btn" type="button">
+          <span id="activeEndpointName">No endpoints configured</span>
+          <span class="selector-arrow">▾</span>
+        </button>
+      </div>
+
+      <!-- Endpoint selector popup -->
+      <div id="endpointPopup" class="endpoint-popup hidden">
+        <div class="popup-search">
+          <input type="text" id="epSearchInput" placeholder="Search endpoints..." />
+        </div>
+        <div id="epListContainer" class="ep-list-container"></div>
       </div>
 
       <!-- Endpoint editor -->

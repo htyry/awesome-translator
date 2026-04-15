@@ -18,7 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
     bubblePosition: document.getElementById('bubblePosition'),
     showCopyButton: document.getElementById('showCopyButton'),
     // LLM endpoint management
-    activeEndpointSelect: document.getElementById('activeEndpointSelect'),
+    endpointSelectorBtn: document.getElementById('endpointSelectorBtn'),
+    activeEndpointName: document.getElementById('activeEndpointName'),
+    endpointPopup: document.getElementById('endpointPopup'),
+    epSearchInput: document.getElementById('epSearchInput'),
+    epListContainer: document.getElementById('epListContainer'),
     endpointEditor: document.getElementById('endpointEditor'),
     epName: document.getElementById('epName'),
     epEndpoint: document.getElementById('epEndpoint'),
@@ -92,14 +96,19 @@ document.addEventListener('DOMContentLoaded', () => {
   elements.deleteEpBtn.addEventListener('click', deleteEndpoint);
   elements.addEpBtn.addEventListener('click', addNewEndpoint);
 
-  elements.activeEndpointSelect.addEventListener('change', () => {
-    const id = elements.activeEndpointSelect.value;
-    loadEndpointEditor(id);
-    if (id) {
-      chrome.storage.local.set({ activeEndpointId: id });
-      chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: id }, () => {
-        void chrome.runtime.lastError;
-      });
+  elements.endpointSelectorBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEndpointPopup();
+  });
+
+  elements.epSearchInput.addEventListener('input', () => {
+    renderEndpointList(elements.epSearchInput.value.trim());
+  });
+
+  // Close popup on outside click
+  document.addEventListener('click', (e) => {
+    if (!elements.endpointPopup.contains(e.target) && e.target !== elements.endpointSelectorBtn) {
+      elements.endpointPopup.classList.add('hidden');
     }
   });
 
@@ -202,32 +211,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── LLM Endpoint Management ───
   let editingEndpointId = null;
+  let cachedEndpoints = [];
 
   async function loadEndpoints() {
     const result = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId']);
     const endpoints = result.llmEndpoints || [];
     const activeId = result.activeEndpointId || '';
+    cachedEndpoints = endpoints;
 
-    // Populate select
-    elements.activeEndpointSelect.innerHTML = '';
-    if (endpoints.length === 0) {
-      elements.activeEndpointSelect.innerHTML = '<option value="">No endpoints configured</option>';
-    } else {
-      endpoints.forEach(ep => {
-        const opt = document.createElement('option');
-        opt.value = ep.id;
-        opt.textContent = ep.name;
-        if (ep.id === activeId) opt.selected = true;
-        elements.activeEndpointSelect.appendChild(opt);
-      });
-    }
+    // Update selector button label
+    const active = endpoints.find(ep => ep.id === activeId) || endpoints[0];
+    elements.activeEndpointName.textContent = active ? active.name : 'No endpoints configured';
 
     // Load editor for active endpoint
-    if (activeId) {
-      loadEndpointEditor(activeId);
+    const editId = active ? active.id : null;
+    if (editId) {
+      loadEndpointEditor(editId);
     } else {
       elements.endpointEditor.classList.add('hidden');
     }
+  }
+
+  function toggleEndpointPopup() {
+    const isHidden = elements.endpointPopup.classList.contains('hidden');
+    if (isHidden) {
+      renderEndpointList('');
+      elements.epSearchInput.value = '';
+      elements.endpointPopup.classList.remove('hidden');
+      elements.epSearchInput.focus();
+    } else {
+      elements.endpointPopup.classList.add('hidden');
+    }
+  }
+
+  async function renderEndpointList(filter) {
+    const result = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId']);
+    const endpoints = result.llmEndpoints || [];
+    const activeId = result.activeEndpointId || '';
+    const filterLower = (filter || '').toLowerCase();
+
+    const filtered = filterLower
+      ? endpoints.filter(ep =>
+          ep.name.toLowerCase().includes(filterLower) ||
+          ep.model.toLowerCase().includes(filterLower) ||
+          ep.endpoint.toLowerCase().includes(filterLower)
+        )
+      : endpoints;
+
+    if (filtered.length === 0) {
+      elements.epListContainer.innerHTML = '<div class="ep-list-empty">No endpoints found</div>';
+      return;
+    }
+
+    elements.epListContainer.innerHTML = filtered.map(ep => `
+      <div class="ep-list-item ${ep.id === activeId ? 'active' : ''}" data-id="${ep.id}">
+        <div class="ep-item-check">${ep.id === activeId ? '✓' : ''}</div>
+        <div class="ep-item-name">${escapeHTML(ep.name)}</div>
+        <div class="ep-item-model">${escapeHTML(ep.model)}</div>
+      </div>
+    `).join('');
+
+    // Bind click events
+    elements.epListContainer.querySelectorAll('.ep-list-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const id = item.dataset.id;
+        selectEndpoint(id);
+      });
+    });
+  }
+
+  async function selectEndpoint(id) {
+    await chrome.storage.local.set({ activeEndpointId: id });
+    elements.endpointPopup.classList.add('hidden');
+    await loadEndpoints();
+    chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: id }, () => {
+      void chrome.runtime.lastError;
+    });
   }
 
   function loadEndpointEditor(id) {
@@ -341,17 +400,20 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.epTestResult.textContent = 'Connecting to LLM...';
 
     try {
+      const startTime = performance.now();
       const response = await sendMessageToBackground({
         type: 'TEST_LLM',
         settings: { llmEndpoint: endpoint, llmApiKey: apiKey, llmModel: model },
       });
+      const latency = Math.round(performance.now() - startTime);
 
       if (response.success) {
+        const latencyClass = latency < 2000 ? 'fast' : latency < 5000 ? 'normal' : 'slow';
         elements.epTestResult.className = 'llm-test-result success';
-        elements.epTestResult.textContent = `Connected! Response: "${response.data?.trim() || 'OK'}"`;
+        elements.epTestResult.innerHTML = `Connected! Response: "${escapeHTML((response.data || '').trim() || 'OK')}"<div class="latency-line">Latency: <span class="latency-value ${latencyClass}">${formatLatency(latency)}</span></div>`;
       } else {
         elements.epTestResult.className = 'llm-test-result error';
-        elements.epTestResult.textContent = `Failed: ${response.error || 'Unknown error'}`;
+        elements.epTestResult.innerHTML = `Failed: ${escapeHTML(response.error || 'Unknown error')}<div class="latency-line">Time elapsed: <span class="latency-value slow">${formatLatency(latency)}</span></div>`;
       }
     } catch (e) {
       elements.epTestResult.className = 'llm-test-result error';
@@ -461,5 +523,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
+  }
+
+  function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function formatLatency(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
   }
 });
