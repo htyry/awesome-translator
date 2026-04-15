@@ -294,6 +294,38 @@ input[type="range"]::-webkit-slider-thumb {
   line-height: 1.6;
 }
 
+/* ─── Endpoint Editor ─── */
+.endpoint-editor {
+  background: #fafafa;
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-top: 8px;
+  border-left: 2px solid #3b6bef;
+}
+
+.endpoint-editor.hidden {
+  display: none;
+}
+
+.endpoint-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.danger-btn {
+  color: #c62828 !important;
+  border-color: #ffcdd2 !important;
+}
+
+.danger-btn:hover {
+  background: #ffebee !important;
+  border-color: #ef9a9a !important;
+}
+
+#activeEndpointSelect {
+  max-width: 100%;
+}
+
 /* ─── Sub-section ─── */
 .sub-section {
   background: #fafafa;

@@ -50,7 +50,7 @@
       'autoTranslate', 'showTriggerIcon',
       'minSelectionLength', 'maxSelectionLength',
       'showCopyButton', 'bubblePosition', 'customShortcut',
-      'defaultMode', 'intentMode', 'targetLang', 'llmApiKey',
+      'defaultMode', 'intentMode', 'targetLang',
     ], r => {
       Object.assign(settings, {
         autoTranslate:       r.autoTranslate ?? true,
@@ -63,14 +63,17 @@
         defaultMode:         r.defaultMode || 'agent',
         intentMode:          r.intentMode || 'auto',
         targetLang:          r.targetLang || 'zh',
-        hasLLM:              !!r.llmApiKey,
       });
-      // Without LLM key, fall back to quick mode
-      if (!settings.hasLLM && settings.defaultMode !== 'quick') {
-        currentMode = MODES.QUICK;
-      } else {
-        currentMode = MODES[settings.defaultMode.toUpperCase()] || MODES.AGENT;
-      }
+      // Check if any LLM endpoint is configured
+      chrome.storage.local.get('llmEndpoints', r2 => {
+        const endpoints = r2.llmEndpoints || [];
+        settings.hasLLM = endpoints.some(e => e.apiKey);
+        if (!settings.hasLLM && settings.defaultMode !== 'quick') {
+          currentMode = MODES.QUICK;
+        } else {
+          currentMode = MODES[settings.defaultMode.toUpperCase()] || MODES.AGENT;
+        }
+      });
     });
   }
 
@@ -304,9 +307,12 @@
       bar.querySelector('#atKwRefresh')?.addEventListener('click', forceRefreshKeywords);
       return;
     }
-    const tagsHtml = keywords.map((kw, i) =>
-      `<span class="at-keyword-tag at-kw-rank-${i}" data-keyword="${escapeHtml(kw)}" title="Click to boost relevance">${escapeHtml(kw)}</span>`
-    ).join('');
+    // Keywords may be { original, translated } objects or legacy strings
+    const tagsHtml = keywords.map((kw, i) => {
+      const label = typeof kw === 'string' ? kw : (kw.translated || kw.original);
+      const original = typeof kw === 'string' ? kw : kw.original;
+      return `<span class="at-keyword-tag at-kw-rank-${i}" data-keyword="${escapeHtml(original)}" title="Click to boost relevance">${escapeHtml(label)}</span>`;
+    }).join('');
     bar.innerHTML = `<span class="at-keywords-label">Domain</span>${tagsHtml}${refreshBtn}`;
     bar.querySelectorAll('.at-keyword-tag').forEach(tag => {
       tag.addEventListener('click', () => promoteKeyword(tag.dataset.keyword));

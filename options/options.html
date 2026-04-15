@@ -165,40 +165,69 @@
     <!-- LLM Settings -->
     <section class="section">
       <h2 class="section-title">LLM Configuration</h2>
-      
-      <div class="option-item column-item">
-        <label for="llmEndpoint">
-          API Endpoint
-          <span class="desc">OpenAI-compatible API base URL (e.g. https://api.openai.com/v1)</span>
-        </label>
-        <input type="text" id="llmEndpoint" placeholder="https://api.openai.com/v1">
-      </div>
+      <p class="section-note">Manage multiple LLM endpoints. Select the active one for translation.</p>
 
-      <div class="option-item column-item">
-        <label for="llmApiKey">
-          API Key
-          <span class="desc">Your API key for the LLM service</span>
-        </label>
-        <div class="input-with-btn">
-          <input type="password" id="llmApiKey" placeholder="sk-...">
-          <button id="toggleKeyBtn" class="toggle-key-btn" type="button">Show</button>
-        </div>
-      </div>
-
-      <div class="option-item column-item">
-        <label for="llmModel">
-          Model Name
-          <span class="desc">Model to use (e.g. gpt-4o-mini, claude-3-haiku, deepseek-chat)</span>
-        </label>
-        <input type="text" id="llmModel" placeholder="gpt-4o-mini">
-      </div>
-
+      <!-- Endpoint list -->
       <div class="option-item">
-        <label>Connection Test</label>
-        <button id="testLlmBtn" class="test-btn" type="button">Test Connection</button>
+        <label>Active Endpoint</label>
+        <select id="activeEndpointSelect">
+          <option value="">No endpoints configured</option>
+        </select>
       </div>
 
-      <div id="llmTestResult" class="llm-test-result"></div>
+      <!-- Endpoint editor -->
+      <div id="endpointEditor" class="endpoint-editor hidden">
+        <div class="option-item column-item">
+          <label for="epName">
+            Endpoint Name
+            <span class="desc">Auto-generated as "model @ domain" if left empty</span>
+          </label>
+          <input type="text" id="epName" placeholder="e.g. GPT-4o @ OpenAI">
+        </div>
+
+        <div class="option-item column-item">
+          <label for="epEndpoint">
+            API Endpoint
+            <span class="desc">OpenAI-compatible API base URL (e.g. https://api.openai.com/v1)</span>
+          </label>
+          <input type="text" id="epEndpoint" placeholder="https://api.openai.com/v1">
+        </div>
+
+        <div class="option-item column-item">
+          <label for="epApiKey">
+            API Key
+            <span class="desc">Your API key for the LLM service</span>
+          </label>
+          <div class="input-with-btn">
+            <input type="password" id="epApiKey" placeholder="sk-...">
+            <button id="toggleEpKeyBtn" class="toggle-key-btn" type="button">Show</button>
+          </div>
+        </div>
+
+        <div class="option-item column-item">
+          <label for="epModel">
+            Model Name
+            <span class="desc">Model to use (e.g. gpt-4o-mini, claude-3-haiku, deepseek-chat)</span>
+          </label>
+          <input type="text" id="epModel" placeholder="gpt-4o-mini">
+        </div>
+
+        <div class="option-item">
+          <label>Actions</label>
+          <div class="endpoint-actions">
+            <button id="saveEpBtn" class="test-btn" type="button">Save Endpoint</button>
+            <button id="testEpBtn" class="test-btn" type="button">Test Connection</button>
+            <button id="deleteEpBtn" class="test-btn danger-btn" type="button">Delete</button>
+          </div>
+        </div>
+
+        <div id="epTestResult" class="llm-test-result"></div>
+      </div>
+
+      <!-- Add new endpoint button -->
+      <div class="option-item">
+        <button id="addEpBtn" class="test-btn" type="button">+ Add New Endpoint</button>
+      </div>
 
       <p class="api-hint">
         Compatible with any OpenAI-format API: OpenAI, DeepSeek, Ollama, vLLM, LM Studio, etc.<br>

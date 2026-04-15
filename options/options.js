@@ -17,12 +17,20 @@ document.addEventListener('DOMContentLoaded', () => {
     maxSelectionLength: document.getElementById('maxSelectionLength'),
     bubblePosition: document.getElementById('bubblePosition'),
     showCopyButton: document.getElementById('showCopyButton'),
-    llmEndpoint: document.getElementById('llmEndpoint'),
-    llmApiKey: document.getElementById('llmApiKey'),
-    toggleKeyBtn: document.getElementById('toggleKeyBtn'),
-    llmModel: document.getElementById('llmModel'),
-    testLlmBtn: document.getElementById('testLlmBtn'),
-    llmTestResult: document.getElementById('llmTestResult'),
+    // LLM endpoint management
+    activeEndpointSelect: document.getElementById('activeEndpointSelect'),
+    endpointEditor: document.getElementById('endpointEditor'),
+    epName: document.getElementById('epName'),
+    epEndpoint: document.getElementById('epEndpoint'),
+    epApiKey: document.getElementById('epApiKey'),
+    epModel: document.getElementById('epModel'),
+    toggleEpKeyBtn: document.getElementById('toggleEpKeyBtn'),
+    saveEpBtn: document.getElementById('saveEpBtn'),
+    testEpBtn: document.getElementById('testEpBtn'),
+    deleteEpBtn: document.getElementById('deleteEpBtn'),
+    addEpBtn: document.getElementById('addEpBtn'),
+    epTestResult: document.getElementById('epTestResult'),
+    // Other
     userProfile: document.getElementById('userProfile'),
     customPromptAgentMeaning: document.getElementById('customPromptAgentMeaning'),
     customPromptAgentGrammar: document.getElementById('customPromptAgentGrammar'),
@@ -51,9 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
     maxSelectionLength: 1000,
     bubblePosition: 'below',
     showCopyButton: true,
-    llmEndpoint: 'https://api.openai.com/v1',
-    llmApiKey: '',
-    llmModel: 'gpt-4o-mini',
     userProfile: '',
     ttsRate: 1,
     ttsVoice: '',
@@ -61,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadSettings();
   loadVoices();
+  loadEndpoints();
 
   elements.openStatsBtn.addEventListener('click', () => {
     window.open(chrome.runtime.getURL('stats/stats.html'), '_blank');
@@ -74,14 +80,28 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.manualTriggerSection.style.display = elements.autoTranslate.checked ? 'none' : 'block';
   });
 
-  elements.toggleKeyBtn.addEventListener('click', () => {
-    const input = elements.llmApiKey;
+  elements.toggleEpKeyBtn.addEventListener('click', () => {
+    const input = elements.epApiKey;
     const isPassword = input.type === 'password';
     input.type = isPassword ? 'text' : 'password';
-    elements.toggleKeyBtn.textContent = isPassword ? 'Hide' : 'Show';
+    elements.toggleEpKeyBtn.textContent = isPassword ? 'Hide' : 'Show';
   });
 
-  elements.testLlmBtn.addEventListener('click', testLLM);
+  elements.saveEpBtn.addEventListener('click', saveEndpoint);
+  elements.testEpBtn.addEventListener('click', testCurrentEndpoint);
+  elements.deleteEpBtn.addEventListener('click', deleteEndpoint);
+  elements.addEpBtn.addEventListener('click', addNewEndpoint);
+
+  elements.activeEndpointSelect.addEventListener('change', () => {
+    const id = elements.activeEndpointSelect.value;
+    loadEndpointEditor(id);
+    if (id) {
+      chrome.storage.local.set({ activeEndpointId: id });
+      chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: id }, () => {
+        void chrome.runtime.lastError;
+      });
+    }
+  });
 
   elements.resetPromptsBtn.addEventListener('click', () => {
     elements.customPromptAgentMeaning.value = '';
@@ -180,22 +200,145 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ─── LLM test ───
-  async function testLLM() {
-    const endpoint = elements.llmEndpoint.value.trim();
-    const apiKey = elements.llmApiKey.value.trim();
-    const model = elements.llmModel.value.trim();
+  // ─── LLM Endpoint Management ───
+  let editingEndpointId = null;
 
-    if (!apiKey || !model) {
-      elements.llmTestResult.className = 'llm-test-result error';
-      elements.llmTestResult.textContent = 'API Key and Model are required.';
+  async function loadEndpoints() {
+    const result = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId']);
+    const endpoints = result.llmEndpoints || [];
+    const activeId = result.activeEndpointId || '';
+
+    // Populate select
+    elements.activeEndpointSelect.innerHTML = '';
+    if (endpoints.length === 0) {
+      elements.activeEndpointSelect.innerHTML = '<option value="">No endpoints configured</option>';
+    } else {
+      endpoints.forEach(ep => {
+        const opt = document.createElement('option');
+        opt.value = ep.id;
+        opt.textContent = ep.name;
+        if (ep.id === activeId) opt.selected = true;
+        elements.activeEndpointSelect.appendChild(opt);
+      });
+    }
+
+    // Load editor for active endpoint
+    if (activeId) {
+      loadEndpointEditor(activeId);
+    } else {
+      elements.endpointEditor.classList.add('hidden');
+    }
+  }
+
+  function loadEndpointEditor(id) {
+    chrome.storage.local.get('llmEndpoints', result => {
+      const endpoints = result.llmEndpoints || [];
+      const ep = endpoints.find(e => e.id === id);
+      if (!ep) {
+        elements.endpointEditor.classList.add('hidden');
+        return;
+      }
+      editingEndpointId = id;
+      elements.epName.value = ep.name || '';
+      elements.epEndpoint.value = ep.endpoint || '';
+      elements.epApiKey.value = ep.apiKey || '';
+      elements.epModel.value = ep.model || '';
+      elements.epTestResult.className = 'llm-test-result';
+      elements.epTestResult.textContent = '';
+      elements.endpointEditor.classList.remove('hidden');
+    });
+  }
+
+  function addNewEndpoint() {
+    editingEndpointId = null;
+    elements.epName.value = '';
+    elements.epEndpoint.value = 'https://';
+    elements.epApiKey.value = '';
+    elements.epModel.value = '';
+    elements.epTestResult.className = 'llm-test-result';
+    elements.epTestResult.textContent = '';
+    elements.endpointEditor.classList.remove('hidden');
+  }
+
+  function generateEndpointName(model, endpoint) {
+    try {
+      const domain = new URL(endpoint).hostname.replace(/^api\./, '');
+      return `${model} @ ${domain}`;
+    } catch { return model || 'New Endpoint'; }
+  }
+
+  async function saveEndpoint() {
+    const endpoint = elements.epEndpoint.value.trim();
+    const apiKey = elements.epApiKey.value.trim();
+    const model = elements.epModel.value.trim();
+
+    if (!endpoint || !apiKey || !model) {
+      showStatus('Endpoint URL, API Key, and Model are required.', 'error');
       return;
     }
 
-    elements.testLlmBtn.disabled = true;
-    elements.testLlmBtn.textContent = 'Testing...';
-    elements.llmTestResult.className = 'llm-test-result loading';
-    elements.llmTestResult.textContent = 'Connecting to LLM...';
+    const result = await chrome.storage.local.get('llmEndpoints');
+    let endpoints = result.llmEndpoints || [];
+
+    const name = elements.epName.value.trim() || generateEndpointName(model, endpoint);
+
+    if (editingEndpointId) {
+      // Update existing
+      const idx = endpoints.findIndex(e => e.id === editingEndpointId);
+      if (idx >= 0) {
+        endpoints[idx] = { ...endpoints[idx], name, endpoint, apiKey, model };
+      }
+    } else {
+      // Add new
+      const id = 'ep_' + Date.now();
+      endpoints.push({ id, name, endpoint, apiKey, model });
+      editingEndpointId = id;
+    }
+
+    await chrome.storage.local.set({ llmEndpoints: endpoints, activeEndpointId: editingEndpointId });
+    await loadEndpoints();
+    // Notify background
+    chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: editingEndpointId }, () => {
+      void chrome.runtime.lastError;
+    });
+    showStatus('Endpoint saved!', 'success');
+  }
+
+  async function deleteEndpoint() {
+    if (!editingEndpointId) return;
+    if (!confirm('Delete this endpoint?')) return;
+
+    const result = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId']);
+    let endpoints = result.llmEndpoints || [];
+    endpoints = endpoints.filter(e => e.id !== editingEndpointId);
+
+    const newActive = endpoints.length > 0 ? endpoints[0].id : '';
+    await chrome.storage.local.set({ llmEndpoints: endpoints, activeEndpointId: newActive });
+
+    editingEndpointId = null;
+    elements.endpointEditor.classList.add('hidden');
+    await loadEndpoints();
+    chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: newActive }, () => {
+      void chrome.runtime.lastError;
+    });
+    showStatus('Endpoint deleted.', 'success');
+  }
+
+  async function testCurrentEndpoint() {
+    const endpoint = elements.epEndpoint.value.trim();
+    const apiKey = elements.epApiKey.value.trim();
+    const model = elements.epModel.value.trim();
+
+    if (!apiKey || !model) {
+      elements.epTestResult.className = 'llm-test-result error';
+      elements.epTestResult.textContent = 'API Key and Model are required.';
+      return;
+    }
+
+    elements.testEpBtn.disabled = true;
+    elements.testEpBtn.textContent = 'Testing...';
+    elements.epTestResult.className = 'llm-test-result loading';
+    elements.epTestResult.textContent = 'Connecting to LLM...';
 
     try {
       const response = await sendMessageToBackground({
@@ -204,18 +347,18 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (response.success) {
-        elements.llmTestResult.className = 'llm-test-result success';
-        elements.llmTestResult.textContent = `Connected! Response: "${response.data?.trim() || 'OK'}"`;
+        elements.epTestResult.className = 'llm-test-result success';
+        elements.epTestResult.textContent = `Connected! Response: "${response.data?.trim() || 'OK'}"`;
       } else {
-        elements.llmTestResult.className = 'llm-test-result error';
-        elements.llmTestResult.textContent = `Failed: ${response.error || 'Unknown error'}`;
+        elements.epTestResult.className = 'llm-test-result error';
+        elements.epTestResult.textContent = `Failed: ${response.error || 'Unknown error'}`;
       }
     } catch (e) {
-      elements.llmTestResult.className = 'llm-test-result error';
-      elements.llmTestResult.textContent = `Error: ${e.message}`;
+      elements.epTestResult.className = 'llm-test-result error';
+      elements.epTestResult.textContent = `Error: ${e.message}`;
     } finally {
-      elements.testLlmBtn.disabled = false;
-      elements.testLlmBtn.textContent = 'Test Connection';
+      elements.testEpBtn.disabled = false;
+      elements.testEpBtn.textContent = 'Test Connection';
     }
   }
 
@@ -236,9 +379,6 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.maxSelectionLength.value = result.maxSelectionLength || DEFAULTS.maxSelectionLength;
       elements.bubblePosition.value = result.bubblePosition || DEFAULTS.bubblePosition;
       elements.showCopyButton.checked = result.showCopyButton !== undefined ? result.showCopyButton : DEFAULTS.showCopyButton;
-      elements.llmEndpoint.value = result.llmEndpoint || DEFAULTS.llmEndpoint;
-      elements.llmApiKey.value = result.llmApiKey || DEFAULTS.llmApiKey;
-      elements.llmModel.value = result.llmModel || DEFAULTS.llmModel;
       elements.userProfile.value = result.userProfile || DEFAULTS.userProfile;
       elements.customPromptAgentMeaning.value = result.customPrompt_agent_meaning || '';
       elements.customPromptAgentGrammar.value = result.customPrompt_agent_grammar || '';
@@ -267,9 +407,6 @@ document.addEventListener('DOMContentLoaded', () => {
       maxSelectionLength: parseInt(elements.maxSelectionLength.value) || DEFAULTS.maxSelectionLength,
       bubblePosition: elements.bubblePosition.value,
       showCopyButton: elements.showCopyButton.checked,
-      llmEndpoint: elements.llmEndpoint.value.trim(),
-      llmApiKey: elements.llmApiKey.value.trim(),
-      llmModel: elements.llmModel.value.trim(),
       userProfile: elements.userProfile.value.trim(),
       customPrompt_agent_meaning: elements.customPromptAgentMeaning.value.trim(),
       customPrompt_agent_grammar: elements.customPromptAgentGrammar.value.trim(),

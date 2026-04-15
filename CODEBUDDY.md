@@ -67,7 +67,8 @@ Rule-based (no LLM call): text ≤3 words and ≤30 chars → `grammar`; otherwi
 - Key format: `ctx:<tabId>` → `{ meaning: { sentences: [], totalTranslated: 0 }, grammar: {...}, _shared: { keywords: [], totalTranslated: 0 } }`
 - **Only source sentences are stored** (not translations) — saves tokens
 - Domain keywords are extracted by LLM every 10 translations (or manually via refresh button)
-- 5 keywords maintained per tab (shared across intents), ranked by relevance
+- 5 keywords maintained per tab (shared across intents), each as `{ original, translated }` bilingual pairs
+- Keywords are bilingual: `original` (English) used in backend prompts, `translated` (target language) shown in frontend
 - Users can click keywords in UI to promote rank (moves to front), which triggers re-translation
 - Refresh button (↻) in keyword bar forces keyword re-extraction even with <3 sentences
 - Tab close or navigation auto-clears context
@@ -96,14 +97,14 @@ Keywords and recent sentences are embedded in the system prompt (not as separate
 
 ### Message Passing Pattern
 
-- **Simple messages**: `GET_TRANSLATION`, `SAVE_SETTINGS`, `TEST_LLM`, `GET_LLM_STATUS`, `SETTINGS_UPDATED`, `GET_USAGE_STATS`, `RESET_USAGE_STATS`, `PROMOTE_KEYWORD`, `GET_KEYWORDS`, `FORCE_UPDATE_KEYWORDS`
+- **Simple messages**: `GET_TRANSLATION`, `SAVE_SETTINGS`, `TEST_LLM`, `GET_LLM_STATUS`, `SETTINGS_UPDATED`, `GET_USAGE_STATS`, `RESET_USAGE_STATS`, `PROMOTE_KEYWORD`, `GET_KEYWORDS`, `FORCE_UPDATE_KEYWORDS`, `SET_ACTIVE_ENDPOINT`
 - **Port streaming**: Content script ↔ Background via `chrome.runtime.connect({ name: 'translation' })` for agent/deep mode with SSE streaming
 - **Port messages**: `translate` (request), `intent`/`chunk`/`result`/`done`/`error`/`keywords` (response)
 - **Content script listens**: `SETTINGS_UPDATED`, `TRANSLATE_TEXT`, `GET_SELECTED_TEXT`, `TRIGGER_TRANSLATE`, `KEYWORDS_UPDATED`
 
 ### LLM Configuration
 
-Supports any OpenAI-compatible API endpoint. Configurable: endpoint URL, API key, model name. Includes connection test button. Works with OpenAI, DeepSeek, Ollama, vLLM, LM Studio, etc.
+Supports multiple LLM endpoint configurations. Each endpoint has: `id`, `name`, `endpoint` (URL), `apiKey`, `model`. Stored as `llmEndpoints` array in `chrome.storage.local`. One endpoint is marked as active via `activeEndpointId`. Auto-generates name as "model @ domain". Legacy single-config (`llmEndpoint`/`llmApiKey`/`llmModel`) is auto-migrated to the new array format. Works with OpenAI, DeepSeek, Ollama, vLLM, LM Studio, etc.
 
 ### Content Script Isolation
 

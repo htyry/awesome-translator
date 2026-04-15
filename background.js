@@ -9,22 +9,60 @@ import { buildMessages, buildKeywordPrompt } from './lib/prompt-templates.js';
 
 // ─── State ───
 let llmClient = null;
+let activeEndpointId = null;
 const contextManager = new ContextManager();
 
 // ─── Init ───
 async function init() {
-  const s = await chrome.storage.local.get([
-    'llmEndpoint', 'llmApiKey', 'llmModel',
-  ]);
-  if (s.llmApiKey) {
-    llmClient = new LLMClient({
-      endpoint: s.llmEndpoint,
+  await initLLMClient();
+}
+
+async function initLLMClient() {
+  const s = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId', 'llmEndpoint', 'llmApiKey', 'llmModel']);
+  const endpoints = s.llmEndpoints || [];
+  activeEndpointId = s.activeEndpointId || null;
+
+  // If no endpoints array but legacy single config exists, migrate it
+  if (endpoints.length === 0 && s.llmApiKey) {
+    const migrated = {
+      id: 'default',
+      name: `${s.llmModel || 'gpt-4o-mini'} @ ${extractDomain(s.llmEndpoint)}`,
+      endpoint: s.llmEndpoint || 'https://api.openai.com/v1',
       apiKey: s.llmApiKey,
-      model: s.llmModel,
-    });
+      model: s.llmModel || 'gpt-4o-mini',
+    };
+    await chrome.storage.local.set({ llmEndpoints: [migrated], activeEndpointId: 'default' });
+    llmClient = new LLMClient({ endpoint: migrated.endpoint, apiKey: migrated.apiKey, model: migrated.model });
+    activeEndpointId = 'default';
+    return;
+  }
+
+  // Use active endpoint or fall back to first one
+  let ep = endpoints.find(e => e.id === activeEndpointId) || endpoints[0] || null;
+  if (ep && ep.apiKey) {
+    activeEndpointId = ep.id;
+    llmClient = new LLMClient({ endpoint: ep.endpoint, apiKey: ep.apiKey, model: ep.model });
+  } else {
+    llmClient = null;
+    activeEndpointId = null;
   }
 }
+
+function extractDomain(url) {
+  try {
+    return new URL(url).hostname.replace(/^api\./, '');
+  } catch { return 'unknown'; }
+}
+
 init();
+
+// ─── Get active endpoint info ───
+async function getActiveEndpoint() {
+  const s = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId']);
+  const endpoints = s.llmEndpoints || [];
+  const id = s.activeEndpointId || activeEndpointId;
+  return endpoints.find(e => e.id === id) || endpoints[0] || null;
+}
 
 // ─── Tab lifecycle: clean up context on close / navigate ───
 chrome.tabs.onRemoved.addListener(tabId => contextManager.clearTab(tabId));
@@ -146,7 +184,7 @@ chrome.runtime.onConnect.addListener(port => {
 
       // Background keyword update (non-blocking, uses all sentences across intents)
       if (shouldUpdate && llmClient) {
-        updateKeywords(tabId).catch(() => {});
+        updateKeywords(tabId, false, targetLang).catch(() => {});
       }
     } catch (e) {
       if (e.name !== 'AbortError') {
@@ -157,7 +195,7 @@ chrome.runtime.onConnect.addListener(port => {
 });
 
 // ─── Keyword extraction (background, non-blocking) ───
-async function updateKeywords(tabId, force = false) {
+async function updateKeywords(tabId, force = false, targetLang = 'zh') {
   if (!llmClient) return;
 
   const [sentences, existingKeywords] = await Promise.all([
@@ -168,8 +206,8 @@ async function updateKeywords(tabId, force = false) {
   if (!force && sentences.length < 3) return;
 
   try {
-    const messages = buildKeywordPrompt(sentences, existingKeywords);
-    const result = await llmClient.chat(messages, { maxTokens: 200 });
+    const messages = buildKeywordPrompt(sentences, existingKeywords, targetLang);
+    const result = await llmClient.chat(messages, { maxTokens: 300 });
 
     // Parse JSON array from response
     let keywords = [];
@@ -179,8 +217,12 @@ async function updateKeywords(tabId, force = false) {
     }
 
     if (Array.isArray(keywords) && keywords.length > 0) {
-      // Clean up: ensure strings only
-      keywords = keywords.filter(k => typeof k === 'string').slice(0, 5);
+      // Normalize to { original, translated } objects
+      keywords = keywords.map(k => {
+        if (typeof k === 'string') return { original: k, translated: k };
+        if (k && k.original) return { original: k.original, translated: k.translated || k.original };
+        return null;
+      }).filter(Boolean).slice(0, 5);
       await contextManager.updateKeywords(tabId, keywords);
 
       // Notify content script about keyword update (shared, no intent)
@@ -262,17 +304,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .catch(e => sendResponse({ success: false, error: e.message }));
       return true;
 
-    case 'GET_LLM_STATUS':
-      sendResponse({
-        success: true,
-        data: llmClient ? llmClient.getConfig() : null,
+    case 'GET_LLM_STATUS': {
+      getActiveEndpoint().then(ep => {
+        sendResponse({
+          success: true,
+          data: ep ? {
+            endpoint: ep.endpoint,
+            model: ep.model,
+            name: ep.name,
+            id: ep.id,
+            hasApiKey: !!ep.apiKey,
+          } : null,
+        });
       });
-      return false;
+      return true;
+    }
 
     case 'SETTINGS_UPDATED':
-      init();
-      sendResponse({ success: true });
-      return false;
+      initLLMClient().then(() => sendResponse({ success: true }));
+      return true;
+
+    case 'SET_ACTIVE_ENDPOINT':
+      chrome.storage.local.set({ activeEndpointId: message.endpointId }, () => {
+        initLLMClient().then(() => sendResponse({ success: true }));
+      });
+      return true;
 
     case 'GET_USAGE_STATS':
       getUsageStats().then(stats => sendResponse({ success: true, data: stats }));
@@ -301,9 +357,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'FORCE_UPDATE_KEYWORDS': {
       const tid = _sender.tab?.id;
       if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
-      updateKeywords(tid, true)
-        .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
-        .catch(e => sendResponse({ success: false, error: e.message }));
+      chrome.storage.local.get('defaultTargetLang', s => {
+        updateKeywords(tid, true, s.defaultTargetLang || 'zh')
+          .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
+          .catch(e => sendResponse({ success: false, error: e.message }));
+      });
       return true;
     }
 

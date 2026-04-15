@@ -279,9 +279,12 @@ document.addEventListener('DOMContentLoaded', () => {
       keywordsBar.querySelector('#kwRefresh')?.addEventListener('click', forceRefreshKeywords);
       return;
     }
-    const tagsHtml = keywords.map((kw, i) =>
-      `<span class="keyword-tag kw-rank-${i}" data-keyword="${escapeHtml(kw)}" title="Click to boost relevance">${escapeHtml(kw)}</span>`
-    ).join('');
+    // Keywords may be { original, translated } objects or legacy strings
+    const tagsHtml = keywords.map((kw, i) => {
+      const label = typeof kw === 'string' ? kw : (kw.translated || kw.original);
+      const original = typeof kw === 'string' ? kw : kw.original;
+      return `<span class="keyword-tag kw-rank-${i}" data-keyword="${escapeHtml(original)}" title="Click to boost relevance">${escapeHtml(label)}</span>`;
+    }).join('');
     keywordsBar.innerHTML = `<span class="keywords-label">Domain</span>${tagsHtml}${refreshBtn}`;
     keywordsBar.querySelectorAll('.keyword-tag').forEach(tag => {
       tag.addEventListener('click', () => {
@@ -331,7 +334,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const resp = await sendMessageToBackground({ type: 'GET_LLM_STATUS' });
       if (resp.success && resp.data) {
         settings.hasLLM = true;
-        llmStatus.textContent = resp.data.model;
+        llmStatus.textContent = resp.data.name || resp.data.model;
         llmStatus.title = `Connected to ${resp.data.endpoint}`;
       } else {
         settings.hasLLM = false;
@@ -345,13 +348,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function loadSettings() {
     chrome.storage.local.get([
-      'defaultTargetLang', 'defaultMode', 'intentMode', 'hasLLM', 'llmApiKey',
+      'defaultTargetLang', 'defaultMode', 'intentMode',
     ], r => {
       if (r.defaultTargetLang) targetLang.value = r.defaultTargetLang;
       settings.defaultMode = r.defaultMode || 'agent';
       settings.intentMode = r.intentMode || 'auto';
-      settings.hasLLM = !!r.llmApiKey;
       settings.targetLang = r.defaultTargetLang || 'zh';
+
+      // Check if any LLM endpoint is configured
+      chrome.storage.local.get('llmEndpoints', r2 => {
+        const endpoints = r2.llmEndpoints || [];
+        settings.hasLLM = endpoints.some(e => e.apiKey);
+      });
 
       // Set initial mode tab
       const initialMode = settings.hasLLM ? settings.defaultMode : 'quick';
