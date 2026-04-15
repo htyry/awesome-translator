@@ -1,0 +1,293 @@
+/* Popup Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 380px;
+  min-height: 340px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13.5px;
+  color: #2c2c2c;
+  background: #ffffff;
+}
+
+.popup-container {
+  padding: 16px 18px;
+}
+
+/* ─── Header ─── */
+.header {
+  margin-bottom: 14px;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #888;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+/* ─── Mode Tabs ─── */
+.mode-tabs {
+  display: flex;
+  gap: 0;
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.mode-tab {
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+  color: #999;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  letter-spacing: 0.2px;
+}
+
+.mode-tab:hover {
+  color: #555;
+}
+
+.mode-tab.active {
+  color: #2c2c2c;
+  background: #fff;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Input ─── */
+.input-section {
+  margin-bottom: 10px;
+}
+
+#sourceText {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  resize: vertical;
+  font-size: 13.5px;
+  font-family: inherit;
+  line-height: 1.6;
+  transition: border-color 0.15s;
+  color: #2c2c2c;
+}
+
+#sourceText:focus {
+  outline: none;
+  border-color: #aaa;
+}
+
+#sourceText::placeholder {
+  color: #bbb;
+}
+
+.language-selector select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  background: white;
+  margin-top: 8px;
+  color: #2c2c2c;
+  transition: border-color 0.15s;
+}
+
+.language-selector select:focus {
+  outline: none;
+  border-color: #aaa;
+}
+
+/* ─── Intent Row ─── */
+.intent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 6px;
+  min-height: 22px;
+}
+
+.intent-badge {
+  display: inline-block;
+  font-size: 11px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 400;
+}
+
+.intent-switch {
+  display: flex;
+  gap: 4px;
+}
+
+.intent-tag {
+  font-size: 11px;
+  color: #999;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.intent-tag:hover {
+  color: #555;
+  background: #f0f0f0;
+}
+
+.intent-tag.active {
+  color: #2c2c2c;
+  background: #eaeaea;
+  font-weight: 500;
+}
+
+/* ─── Translate Button ─── */
+.primary-btn {
+  width: 100%;
+  padding: 8px;
+  background: #2c2c2c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.primary-btn:hover {
+  background: #444;
+}
+
+.primary-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── Output ─── */
+.output-section {
+  margin-top: 10px;
+  position: relative;
+}
+
+.result-box {
+  min-height: 72px;
+  max-height: 200px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  line-height: 1.7;
+  font-size: 13.5px;
+  overflow-y: auto;
+  word-break: break-word;
+  color: #2c2c2c;
+}
+
+.result-box.has-result {
+  border-color: #ddd;
+  background: #fff;
+}
+
+.result-box.streaming {
+  border-left: 2px solid #ddd;
+  padding-left: 10px;
+  color: #555;
+}
+
+.error-text {
+  color: #c44 !important;
+  font-size: 12.5px;
+}
+
+.output-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.action-btn {
+  padding: 3px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #999;
+  letter-spacing: 0.2px;
+  transition: color 0.15s;
+}
+
+.action-btn:hover {
+  color: #555;
+}
+
+/* ─── Content formatting ─── */
+.popup-h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2c2c2c;
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.popup-h3 {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #555;
+  margin: 8px 0 3px;
+}
+
+/* ─── Footer ─── */
+.footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.llm-status {
+  font-size: 11px;
+  color: #aaa;
+}
+
+.settings-btn {
+  padding: 3px 12px;
+  background: transparent;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #888;
+  transition: all 0.15s;
+}
+
+.settings-btn:hover {
+  border-color: #ccc;
+  color: #555;
+}
+
+/* ─── Utility ─── */
+.hidden {
+  display: none !important;
+}

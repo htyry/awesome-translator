@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Awesome Translator - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <header class="header">
+      <h1>Awesome Translator</h1>
+      <p class="subtitle">Configure your translation agent</p>
+    </header>
+
+    <!-- Language Settings -->
+    <section class="section">
+      <h2 class="section-title">Language</h2>
+      
+      <div class="option-item">
+        <label for="defaultTargetLang">
+          Default Target Language
+          <span class="desc">Language to translate into</span>
+        </label>
+        <select id="defaultTargetLang">
+          <option value="zh">Chinese (中文)</option>
+          <option value="en">English</option>
+          <option value="ja">Japanese (日本語)</option>
+          <option value="ko">Korean (한국어)</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+          <option value="ru">Russian</option>
+          <option value="pt">Portuguese</option>
+          <option value="it">Italian</option>
+          <option value="ar">Arabic</option>
+          <option value="hi">Hindi</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Translation Mode -->
+    <section class="section">
+      <h2 class="section-title">Translation Mode</h2>
+
+      <div class="option-item">
+        <label for="defaultMode">
+          Default translation mode
+          <span class="desc">Mode used when you select text on a page</span>
+        </label>
+        <select id="defaultMode">
+          <option value="quick">Quick (free, no LLM)</option>
+          <option value="agent">Agent (context-aware)</option>
+          <option value="deep">Deep analysis</option>
+        </select>
+      </div>
+
+      <div class="option-item">
+        <label for="intentMode">
+          Intent detection mode
+          <span class="desc">How to decide between "meaning" and "grammar" for Agent mode</span>
+        </label>
+        <select id="intentMode">
+          <option value="auto">Auto (rule-based)</option>
+          <option value="manual">Manual (user chooses each time)</option>
+        </select>
+      </div>
+
+      <div class="option-item">
+        <label for="contextHistoryLimit">
+          Context history pairs
+          <span class="desc">Number of previous Q&A pairs to keep as context per page</span>
+        </label>
+        <input type="number" id="contextHistoryLimit" min="1" max="20" value="5">
+      </div>
+    </section>
+
+    <!-- Translation Behavior -->
+    <section class="section">
+      <h2 class="section-title">Behavior</h2>
+      
+      <div class="option-item toggle-item">
+        <label for="autoTranslate">
+          Auto-translate on selection
+          <span class="desc">Automatically show bubble when text is selected</span>
+        </label>
+        <input type="checkbox" id="autoTranslate" checked>
+      </div>
+
+      <div id="manualTriggerSection" class="sub-section">
+        <p class="section-note">When auto-translate is off, use these methods to translate:</p>
+
+        <div class="option-item toggle-item">
+          <label for="showTriggerIcon">
+            Show translate button on selection
+            <span class="desc">Display a small icon near selected text, click to translate</span>
+          </label>
+          <input type="checkbox" id="showTriggerIcon" checked>
+        </div>
+
+        <div class="option-item">
+          <label for="triggerShortcut">
+            Keyboard shortcut to translate selection
+            <span class="desc">Click below, then press your desired key combination</span>
+          </label>
+          <div class="shortcut-recorder">
+            <button id="shortcutBtn" class="shortcut-btn" type="button">
+              <span id="shortcutDisplay">Alt+Shift+T</span>
+            </button>
+            <div id="shortcutHint" class="shortcut-hint-text">Click to change shortcut</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="option-item toggle-item">
+        <label for="showContextMenu">
+          Enable right-click menu
+          <span class="desc">Add "Translate" option to context menu</span>
+        </label>
+        <input type="checkbox" id="showContextMenu" checked>
+      </div>
+
+      <div class="option-item">
+        <label for="minSelectionLength">
+          Minimum selection length
+          <span class="desc">Only show button when selection exceeds this length</span>
+        </label>
+        <input type="number" id="minSelectionLength" min="1" max="100" value="1">
+      </div>
+
+      <div class="option-item">
+        <label for="maxSelectionLength">
+          Maximum selection length
+          <span class="desc">Don't show button if selection exceeds this length</span>
+        </label>
+        <input type="number" id="maxSelectionLength" min="100" max="10000" value="1000">
+      </div>
+    </section>
+
+    <!-- Bubble Appearance -->
+    <section class="section">
+      <h2 class="section-title">Bubble Style</h2>
+      
+      <div class="option-item">
+        <label for="bubblePosition">
+          Bubble position
+          <span class="desc">Where the translation bubble appears relative to selection</span>
+        </label>
+        <select id="bubblePosition">
+          <option value="below">Below selection (default)</option>
+          <option value="above">Above selection</option>
+          <option value="nearest">Nearest to viewport edge</option>
+        </select>
+      </div>
+
+      <div class="option-item toggle-item">
+        <label for="showCopyButton">
+          Show copy button in bubble
+          <span class="desc">Display a copy button in the translation bubble</span>
+        </label>
+        <input type="checkbox" id="showCopyButton" checked>
+      </div>
+    </section>
+
+    <!-- LLM Settings -->
+    <section class="section">
+      <h2 class="section-title">LLM Configuration</h2>
+      
+      <div class="option-item column-item">
+        <label for="llmEndpoint">
+          API Endpoint
+          <span class="desc">OpenAI-compatible API base URL (e.g. https://api.openai.com/v1)</span>
+        </label>
+        <input type="text" id="llmEndpoint" placeholder="https://api.openai.com/v1">
+      </div>
+
+      <div class="option-item column-item">
+        <label for="llmApiKey">
+          API Key
+          <span class="desc">Your API key for the LLM service</span>
+        </label>
+        <div class="input-with-btn">
+          <input type="password" id="llmApiKey" placeholder="sk-...">
+          <button id="toggleKeyBtn" class="toggle-key-btn" type="button">Show</button>
+        </div>
+      </div>
+
+      <div class="option-item column-item">
+        <label for="llmModel">
+          Model Name
+          <span class="desc">Model to use (e.g. gpt-4o-mini, claude-3-haiku, deepseek-chat)</span>
+        </label>
+        <input type="text" id="llmModel" placeholder="gpt-4o-mini">
+      </div>
+
+      <div class="option-item">
+        <label>Connection Test</label>
+        <button id="testLlmBtn" class="test-btn" type="button">Test Connection</button>
+      </div>
+
+      <div id="llmTestResult" class="llm-test-result"></div>
+
+      <p class="api-hint">
+        Compatible with any OpenAI-format API: OpenAI, DeepSeek, Ollama, vLLM, LM Studio, etc.<br>
+        Quick mode (free) uses Google Translate and does not require LLM configuration.
+      </p>
+    </section>
+
+    <!-- User Profile -->
+    <section class="section">
+      <h2 class="section-title">User Profile</h2>
+      
+      <div class="option-item column-item">
+        <label for="userProfile">
+          Profile description
+          <span class="desc">Briefly describe your profession/domain/interests. This helps the agent adapt translations (e.g. "前端开发者，经常阅读技术文档")</span>
+        </label>
+        <textarea id="userProfile" rows="3" placeholder="e.g. 前端开发者，经常阅读技术文档和英文论文..."></textarea>
+      </div>
+    </section>
+
+    <!-- Custom Prompt Templates -->
+    <section class="section">
+      <h2 class="section-title">Custom Prompts</h2>
+      <p class="section-note">Override default system prompts for each mode. Leave empty to use the built-in prompt.</p>
+
+      <div class="option-item column-item">
+        <label for="customPromptAgentMeaning">
+          Agent - Meaning
+          <span class="desc">System prompt when translating with context awareness</span>
+        </label>
+        <textarea id="customPromptAgentMeaning" rows="4" placeholder="Leave empty to use default prompt..."></textarea>
+      </div>
+
+      <div class="option-item column-item">
+        <label for="customPromptAgentGrammar">
+          Agent - Grammar
+          <span class="desc">System prompt when analyzing grammar and usage</span>
+        </label>
+        <textarea id="customPromptAgentGrammar" rows="4" placeholder="Leave empty to use default prompt..."></textarea>
+      </div>
+
+      <div class="option-item column-item">
+        <label for="customPromptDeep">
+          Deep Analysis
+          <span class="desc">System prompt for word/phrase deep analysis</span>
+        </label>
+        <textarea id="customPromptDeep" rows="4" placeholder="Leave empty to use default prompt..."></textarea>
+      </div>
+
+      <div class="option-item">
+        <button id="resetPromptsBtn" class="test-btn" type="button">Reset Prompts to Defaults</button>
+      </div>
+    </section>
+
+    <!-- TTS Settings -->
+    <section class="section">
+      <h2 class="section-title">Text-to-Speech</h2>
+
+      <div class="option-item">
+        <label for="ttsRate">
+          Speech rate
+          <span class="desc">Speed of TTS playback (0.5 - 2.0)</span>
+        </label>
+        <div class="range-wrapper">
+          <input type="range" id="ttsRate" min="0.5" max="2" step="0.1" value="1">
+          <span id="ttsRateValue" class="range-value">1.0</span>
+        </div>
+      </div>
+
+      <div class="option-item">
+        <label for="ttsVoice">
+          Voice
+          <span class="desc">Preferred TTS voice (depends on browser/OS)</span>
+        </label>
+        <select id="ttsVoice">
+          <option value="">Default</option>
+        </select>
+      </div>
+
+      <div class="option-item">
+        <label>Preview</label>
+        <button id="ttsPreviewBtn" class="test-btn" type="button">Listen Preview</button>
+      </div>
+    </section>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button id="saveBtn" class="save-btn primary-btn">Save Settings</button>
+      <button id="resetBtn" class="reset-btn">Reset to Defaults</button>
+      <button id="openStatsBtn" class="reset-btn">Usage Statistics</button>
+      <span id="statusMsg" class="status-msg"></span>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

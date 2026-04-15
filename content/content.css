@@ -1,0 +1,225 @@
+/* Content Script Styles — injected into web pages, all classes prefixed with `at-` */
+
+/* ─── Panel (main bubble) ─── */
+.at-panel {
+  position: absolute;
+  z-index: 2147483647;
+  width: 360px;
+  max-height: 70vh;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.08);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #2c2c2c;
+  overflow: hidden;
+  animation: at-fade-in 0.15s ease-out;
+}
+
+@keyframes at-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Header ─── */
+.at-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #eee;
+}
+
+.at-title {
+  font-weight: 500;
+  font-size: 12px;
+  color: #888;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.at-close-btn {
+  background: transparent;
+  border: none;
+  color: #aaa;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.at-close-btn:hover { color: #666; }
+
+/* ─── Mode Tabs ─── */
+.at-mode-tabs {
+  display: flex;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+}
+
+.at-mode-tab {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+  color: #999;
+  cursor: pointer;
+  transition: color 0.15s;
+  border-bottom: 1.5px solid transparent;
+  letter-spacing: 0.2px;
+}
+
+.at-mode-tab:hover { color: #555; }
+
+.at-mode-tab.at-active {
+  color: #2c2c2c;
+  border-bottom-color: #2c2c2c;
+  font-weight: 500;
+}
+
+/* ─── Intent Row ─── */
+.at-intent-row {
+  padding: 4px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+}
+
+.at-intent-badge {
+  display: inline-block;
+  font-size: 11px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 400;
+}
+
+.at-intent-switch {
+  display: flex;
+  gap: 4px;
+}
+
+.at-intent-tag {
+  font-size: 11px;
+  color: #999;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.at-intent-tag:hover { color: #555; background: #f0f0f0; }
+
+.at-intent-tag.at-active {
+  color: #2c2c2c;
+  background: #eaeaea;
+  font-weight: 500;
+}
+
+/* ─── Panel Body ─── */
+.at-panel-body {
+  padding: 12px 14px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.at-result {
+  color: #2c2c2c;
+  font-size: 13.5px;
+  line-height: 1.7;
+  word-break: break-word;
+  min-height: 20px;
+}
+
+.at-result.at-streaming {
+  border-left: 2px solid #ddd;
+  padding-left: 10px;
+  color: #555;
+}
+
+/* ─── Content formatting ─── */
+.at-h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2c2c2c;
+  margin: 12px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.at-h3 {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #555;
+  margin: 8px 0 3px;
+}
+
+.at-error { color: #c44 !important; font-size: 12.5px; }
+
+.at-loading {
+  color: #aaa !important;
+  font-style: italic;
+  font-size: 12.5px;
+}
+
+/* ─── Actions Bar ─── */
+.at-panel-actions {
+  display: flex;
+  gap: 2px;
+  padding: 6px 12px;
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+
+.at-action-btn {
+  padding: 3px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #999;
+  letter-spacing: 0.2px;
+  transition: color 0.15s;
+}
+
+.at-action-btn:hover { color: #555; }
+
+/* ─── Trigger Button ─── */
+.at-trigger-btn {
+  position: absolute;
+  z-index: 2147483646;
+  width: 28px;
+  height: 28px;
+  background: #2c2c2c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 28px;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  animation: at-pop-in 0.12s ease-out;
+  user-select: none;
+  letter-spacing: 0;
+}
+
+.at-trigger-btn:hover {
+  background: #444;
+}
+
+@keyframes at-pop-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ─── Utility ─── */
+.at-hidden { display: none !important; }

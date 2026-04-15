@@ -1,0 +1,49 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Awesome Translator",
+  "version": "2.0.0",
+  "description": "AI-powered translation agent with context memory and deep word analysis",
+  "permissions": ["activeTab", "storage", "contextMenus"],
+  "host_permissions": [
+    "https://translate.googleapis.com/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "options_page": "options/options.html",
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+O" },
+      "description": "Open popup to translate selected text"
+    },
+    "trigger-translate": {
+      "suggested_key": { "default": "Alt+Shift+T" },
+      "description": "Translate currently selected text"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/content.js"],
+      "css": ["content/content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["assets/*", "stats/*"], "matches": ["<all_urls>"] }
+  ]
+}

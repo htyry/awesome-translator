@@ -1,0 +1,428 @@
+/* Options Page Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13.5px;
+  color: #2c2c2c;
+  background: #f5f5f5;
+  line-height: 1.6;
+}
+
+.options-container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 36px 24px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 500;
+  color: #2c2c2c;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.subtitle {
+  font-size: 12.5px;
+  color: #aaa;
+}
+
+/* ─── Section ─── */
+.section {
+  background: white;
+  border-radius: 8px;
+  padding: 18px 22px;
+  margin-bottom: 12px;
+  border: 1px solid #eee;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f0f0f0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ─── Option item ─── */
+.option-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.option-item:last-child {
+  border-bottom: none;
+}
+
+.option-item label {
+  flex: 1;
+  cursor: pointer;
+}
+
+.option-item label strong,
+.option-item label {
+  display: block;
+  color: #2c2c2c;
+  font-weight: 400;
+}
+
+.desc {
+  display: block;
+  font-size: 11.5px;
+  color: #aaa;
+  margin-top: 1px;
+  font-weight: normal !important;
+}
+
+/* Column layout for text inputs / textareas */
+.column-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* ─── Inputs ─── */
+select,
+input[type="text"],
+input[type="password"],
+input[type="number"] {
+  width: 220px;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 13px;
+  background: white;
+  transition: border-color 0.15s;
+  color: #2c2c2c;
+}
+
+.column-item select,
+.column-item input[type="text"],
+.column-item input[type="password"],
+.column-item input[type="number"] {
+  width: 100%;
+}
+
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 13px;
+  background: white;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+  color: #2c2c2c;
+}
+
+textarea:focus,
+select:focus,
+input:focus {
+  outline: none;
+  border-color: #aaa;
+}
+
+/* ─── Input with button (API key) ─── */
+.input-with-btn {
+  display: flex;
+  gap: 6px;
+}
+
+.input-with-btn input {
+  flex: 1;
+}
+
+.toggle-key-btn {
+  padding: 6px 10px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s;
+  color: #666;
+}
+
+.toggle-key-btn:hover {
+  background: #eee;
+}
+
+/* ─── Toggle switch ─── */
+.toggle-item {
+  padding: 11px 0;
+}
+
+.toggle-item input[type="checkbox"] {
+  width: 36px;
+  height: 20px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: #ccc;
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-item input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-item input[type="checkbox"]:checked {
+  background: #2c2c2c;
+}
+
+.toggle-item input[type="checkbox"]:checked::before {
+  transform: translateX(16px);
+}
+
+/* ─── Range slider ─── */
+.range-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+input[type="range"] {
+  width: 140px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: #ddd;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #2c2c2c;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.range-value {
+  min-width: 24px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #888;
+  text-align: center;
+}
+
+/* ─── Test button ─── */
+.test-btn {
+  padding: 5px 14px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: #666;
+}
+
+.test-btn:hover {
+  background: #eee;
+  border-color: #ccc;
+}
+
+.test-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── LLM test result ─── */
+.llm-test-result {
+  padding: 8px 10px;
+  margin-top: 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.llm-test-result.success {
+  background: #f5faf5;
+  color: #2e7d32;
+}
+
+.llm-test-result.error {
+  background: #fdf5f5;
+  color: #c62828;
+}
+
+.llm-test-result.loading {
+  background: #f5f8fc;
+  color: #1565c0;
+}
+
+/* ─── API hint ─── */
+.api-hint {
+  font-size: 11.5px;
+  color: #aaa;
+  margin-top: 10px;
+  padding-left: 2px;
+  line-height: 1.6;
+}
+
+/* ─── Sub-section ─── */
+.sub-section {
+  background: #fafafa;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-top: 8px;
+  border-left: 2px solid #ddd;
+}
+
+.section-note {
+  font-size: 12.5px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.section > .section-note {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 14px;
+}
+
+.sub-section .option-item {
+  border-bottom-color: #f0f0f0;
+}
+
+/* ─── Actions ─── */
+.actions {
+  text-align: center;
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.primary-btn {
+  padding: 9px 24px;
+  background: #2c2c2c;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.primary-btn:hover {
+  background: #444;
+}
+
+.reset-btn {
+  padding: 8px 20px;
+  background: transparent;
+  color: #888;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.reset-btn:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #555;
+}
+
+.status-msg {
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.status-msg.show {
+  opacity: 1;
+}
+
+.status-msg.success {
+  color: #2e7d32;
+  background: #f5faf5;
+}
+
+.status-msg.error {
+  color: #c62828;
+  background: #fdf5f5;
+}
+
+/* ─── Shortcut Key Recorder ─── */
+.shortcut-recorder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shortcut-btn {
+  min-width: 120px;
+  padding: 6px 16px;
+  background: #2c2c2c;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  transition: background 0.15s;
+}
+
+.shortcut-btn:hover {
+  background: #444;
+}
+
+.shortcut-btn.recording {
+  animation: at-pulse 1s ease-in-out infinite;
+  outline: 1px solid #2c2c2c;
+}
+
+@keyframes at-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+.shortcut-hint-text {
+  font-size: 11px;
+  color: #aaa;
+}

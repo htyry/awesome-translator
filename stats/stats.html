@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Usage Statistics - Awesome Translator</title>
+  <link rel="stylesheet" href="stats.css">
+</head>
+<body>
+  <div class="stats-container">
+    <header class="header">
+      <h1>Usage Statistics</h1>
+      <p class="subtitle">API call history and character usage</p>
+    </header>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards" id="summaryCards">
+      <div class="card">
+        <div class="card-value" id="totalCalls">-</div>
+        <div class="card-label">Total Calls</div>
+      </div>
+      <div class="card">
+        <div class="card-value" id="llmCalls">-</div>
+        <div class="card-label">LLM Calls</div>
+      </div>
+      <div class="card">
+        <div class="card-value" id="totalIn">-</div>
+        <div class="card-label">Input Chars</div>
+      </div>
+      <div class="card">
+        <div class="card-value" id="totalOut">-</div>
+        <div class="card-label">Output Chars</div>
+      </div>
+    </div>
+
+    <!-- Daily Breakdown -->
+    <section class="section">
+      <h2 class="section-title">Daily Breakdown</h2>
+      <div id="dailyTable" class="table-container">
+        <div class="loading-text">Loading...</div>
+      </div>
+    </section>
+
+    <!-- LLM Info -->
+    <section class="section">
+      <h2 class="section-title">LLM Configuration Used</h2>
+      <div id="llmInfo" class="llm-info">
+        <div class="loading-text">Loading...</div>
+      </div>
+    </section>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button id="refreshBtn" class="btn-secondary">Refresh</button>
+      <button id="resetBtn" class="btn-danger">Reset All Data</button>
+      <button id="exportBtn" class="btn-secondary">Export CSV</button>
+      <button id="backBtn" class="btn-secondary">Back to Settings</button>
+    </div>
+  </div>
+
+  <script src="stats.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "workbench.colorTheme": "Solarized Light",
+  "editor.wordWrap": "on",
+  "editor.wordWrapColumn": 80,
+  "editor.rulers": [80],
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "files.encoding": "utf8",
+  "files.autoGuessEncoding": true
+}
