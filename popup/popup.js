@@ -216,6 +216,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // ─── Settings ───
   settingsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
+  document.getElementById('openPdfBtn').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('pdf-viewer/pdf-viewer.html') });
+  });
+
   // ─── Helpers ───
   function showResult(text) {
     resultBox.textContent = text;

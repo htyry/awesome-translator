@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Translator - Awesome Translator</title>
+  <link rel="stylesheet" href="pdf-viewer.css">
+  <link rel="stylesheet" href="../content/content.css">
+</head>
+<body>
+  <!-- Toolbar -->
+  <div class="pv-toolbar">
+    <div class="pv-toolbar-left">
+      <button id="pvOpenBtn" class="pv-btn" title="Open PDF file">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h5.672a1.5 1.5 0 0 1 1.06.44l3.329 3.328a1.5 1.5 0 0 1 .439 1.06V12.5A1.5 1.5 0 0 1 12.5 14h-9A1.5 1.5 0 0 1 2 12.5v-9Z" stroke="currentColor" stroke-width="1.2"/><path d="M5 2v3.5A1.5 1.5 0 0 0 6.5 7H10" stroke="currentColor" stroke-width="1.2"/></svg>
+        Open
+      </button>
+      <div class="pv-separator"></div>
+      <button id="pvPrevBtn" class="pv-btn pv-btn-icon" title="Previous page" disabled>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 2.5 4.5 7 9 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="pv-page-info">
+        <input id="pvPageInput" type="number" class="pv-page-input" value="1" min="1" disabled>
+        <span class="pv-page-sep">/</span>
+        <span id="pvTotalPages" class="pv-page-total">0</span>
+      </span>
+      <button id="pvNextBtn" class="pv-btn pv-btn-icon" title="Next page" disabled>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 2.5 9.5 7 5 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="pv-toolbar-right">
+      <button id="pvZoomOutBtn" class="pv-btn pv-btn-icon" title="Zoom out" disabled>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="3.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 8.5 12 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M4 6h4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+      </button>
+      <span id="pvZoomLevel" class="pv-zoom-label">100%</span>
+      <button id="pvZoomInBtn" class="pv-btn pv-btn-icon" title="Zoom in" disabled>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="3.5" stroke="currentColor" stroke-width="1.2"/><path d="M8.5 8.5 12 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4v4M4 6h4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+      </button>
+      <button id="pvFitBtn" class="pv-btn" title="Fit to width" disabled>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 5V2a1 1 0 0 1 1-1h3M9 1h3a1 1 0 0 1 1 1v3M13 9v3a1 1 0 0 1-1 1H9M5 13H2a1 1 0 0 1-1-1V9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- PDF Viewer Area -->
+  <div id="pvContainer" class="pv-container">
+    <div id="pvWelcome" class="pv-welcome">
+      <div class="pv-welcome-icon">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect x="8" y="4" width="32" height="40" rx="3" stroke="#ccc" stroke-width="2"/><path d="M16 16h16M16 22h12M16 28h14" stroke="#ddd" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </div>
+      <p class="pv-welcome-text">Open a PDF file to start translating</p>
+      <button id="pvWelcomeOpenBtn" class="pv-welcome-btn">Choose File</button>
+      <p class="pv-welcome-hint">Or drag and drop a PDF here</p>
+    </div>
+    <div id="pdfViewer" class="pv-viewer"></div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="pv-statusbar">
+    <span id="pvFileName" class="pv-filename"></span>
+    <span id="pvStatus" class="pv-status-text">Ready</span>
+  </div>
+
+  <input type="file" id="pvFileInput" accept=".pdf" style="display:none">
+
+  <!-- Load content.js for translation panel -->
+  <script src="../content/content.js"></script>
+  <!-- PDF viewer logic -->
+  <script src="pdf-viewer.js"></script>
+</body>
+</html>
