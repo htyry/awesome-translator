@@ -298,17 +298,20 @@
   function updateKeywordsDisplay(keywords) {
     const bar = panel?.querySelector('#atKeywordsBar');
     if (!bar) return;
+    const refreshBtn = '<span class="at-keywords-refresh" title="Force refresh keywords" id="atKwRefresh">&#x21bb;</span>';
     if (!keywords || keywords.length === 0) {
-      bar.innerHTML = '<span class="at-keywords-label">Domain</span><span class="at-keywords-empty">accumulating...</span>';
+      bar.innerHTML = '<span class="at-keywords-label">Domain</span><span class="at-keywords-empty">accumulating...</span>' + refreshBtn;
+      bar.querySelector('#atKwRefresh')?.addEventListener('click', forceRefreshKeywords);
       return;
     }
     const tagsHtml = keywords.map((kw, i) =>
       `<span class="at-keyword-tag at-kw-rank-${i}" data-keyword="${escapeHtml(kw)}" title="Click to boost relevance">${escapeHtml(kw)}</span>`
     ).join('');
-    bar.innerHTML = `<span class="at-keywords-label">Domain</span>${tagsHtml}`;
+    bar.innerHTML = `<span class="at-keywords-label">Domain</span>${tagsHtml}${refreshBtn}`;
     bar.querySelectorAll('.at-keyword-tag').forEach(tag => {
       tag.addEventListener('click', () => promoteKeyword(tag.dataset.keyword));
     });
+    bar.querySelector('#atKwRefresh')?.addEventListener('click', forceRefreshKeywords);
   }
 
   function promoteKeyword(keyword) {
@@ -316,6 +319,29 @@
     chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', keyword }, resp => {
       if (resp?.success && resp.data?.keywords) {
         updateKeywordsDisplay(resp.data.keywords);
+        // Re-translate with updated keyword order (clear cached result for current mode)
+        if (currentText && !isTranslating) {
+          modeResults[currentMode] = null;
+          requestTranslation();
+        }
+      }
+    });
+  }
+
+  function forceRefreshKeywords() {
+    if (!panel || isTranslating) return;
+    const refreshEl = panel.querySelector('#atKwRefresh');
+    if (refreshEl) refreshEl.textContent = '...';
+    chrome.runtime.sendMessage({ type: 'FORCE_UPDATE_KEYWORDS' }, resp => {
+      if (resp?.success && resp.data?.keywords) {
+        updateKeywordsDisplay(resp.data.keywords);
+        // Re-translate with updated keywords
+        if (currentText && !isTranslating) {
+          modeResults[currentMode] = null;
+          requestTranslation();
+        }
+      } else {
+        if (refreshEl) refreshEl.innerHTML = '&#x21bb;';
       }
     });
   }
@@ -468,6 +494,7 @@
       .replace(/^## (.+)$/gm, '<div class="at-h2">$1</div>')
       .replace(/^### (.+)$/gm, '<div class="at-h3">$1</div>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code class="at-code">$1</code>')
       .replace(/\n/g, '<br>');
 
     // Render **Terms** section as a styled card

@@ -54,8 +54,8 @@ Create a ZIP of all project files (excluding node_modules if any) for Chrome Web
 | Mode | Backend | Context | Description |
 |------|---------|---------|-------------|
 | **Quick** | Google Translate (free) | None | Fast simple translation, no LLM required |
-| **Agent** | LLM (streaming) | Keywords + recent sentences | Context-aware translation with domain keywords, intent detection, special noun annotation |
-| **Deep** | LLM (streaming) | Keywords + recent sentences | Word analysis: etymology, roots, usage, examples |
+| **Agent** | LLM (streaming) | Keywords only (when available) | Context-aware translation with domain keywords, intent detection, special noun annotation |
+| **Deep** | LLM (streaming) | Keywords only (when available) | Word analysis: etymology, roots, usage, examples |
 
 ### Intent Classification
 
@@ -63,14 +63,16 @@ Rule-based (no LLM call): text ≤3 words and ≤30 chars → `grammar`; otherwi
 
 ### Context Management
 
-- Per-tab, per-intent isolated context stored in `chrome.storage.local`
-- Key format: `ctx:<tabId>` → `{ meaning: { sentences: [], keywords: [], totalTranslated: 0 }, grammar: {...} }`
+- Per-tab, per-intent isolated sentence storage + shared keywords stored in `chrome.storage.local`
+- Key format: `ctx:<tabId>` → `{ meaning: { sentences: [], totalTranslated: 0 }, grammar: {...}, _shared: { keywords: [], totalTranslated: 0 } }`
 - **Only source sentences are stored** (not translations) — saves tokens
-- Domain keywords are extracted by LLM every 10 translations
-- 5 keywords maintained per intent, ranked by relevance
-- Users can click keywords in UI to promote rank (moves to front)
+- Domain keywords are extracted by LLM every 10 translations (or manually via refresh button)
+- 5 keywords maintained per tab (shared across intents), ranked by relevance
+- Users can click keywords in UI to promote rank (moves to front), which triggers re-translation
+- Refresh button (↻) in keyword bar forces keyword re-extraction even with <3 sentences
 - Tab close or navigation auto-clears context
-- Recent sentences (up to `contextHistoryLimit`) injected into system prompt for domain awareness
+- When keywords exist, only keywords are injected into system prompt (sentences skipped to save tokens)
+- When no keywords yet, recent sentences are injected as fallback for domain awareness
 - Optional user profile injected into system prompt
 
 ### Keyword Extraction Flow
@@ -94,7 +96,7 @@ Keywords and recent sentences are embedded in the system prompt (not as separate
 
 ### Message Passing Pattern
 
-- **Simple messages**: `GET_TRANSLATION`, `SAVE_SETTINGS`, `TEST_LLM`, `GET_LLM_STATUS`, `SETTINGS_UPDATED`, `GET_USAGE_STATS`, `RESET_USAGE_STATS`, `PROMOTE_KEYWORD`, `GET_KEYWORDS`
+- **Simple messages**: `GET_TRANSLATION`, `SAVE_SETTINGS`, `TEST_LLM`, `GET_LLM_STATUS`, `SETTINGS_UPDATED`, `GET_USAGE_STATS`, `RESET_USAGE_STATS`, `PROMOTE_KEYWORD`, `GET_KEYWORDS`, `FORCE_UPDATE_KEYWORDS`
 - **Port streaming**: Content script ↔ Background via `chrome.runtime.connect({ name: 'translation' })` for agent/deep mode with SSE streaming
 - **Port messages**: `translate` (request), `intent`/`chunk`/`result`/`done`/`error`/`keywords` (response)
 - **Content script listens**: `SETTINGS_UPDATED`, `TRANSLATE_TEXT`, `GET_SELECTED_TEXT`, `TRIGGER_TRANSLATE`, `KEYWORDS_UPDATED`

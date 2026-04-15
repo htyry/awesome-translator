@@ -157,7 +157,7 @@ chrome.runtime.onConnect.addListener(port => {
 });
 
 // ─── Keyword extraction (background, non-blocking) ───
-async function updateKeywords(tabId) {
+async function updateKeywords(tabId, force = false) {
   if (!llmClient) return;
 
   const [sentences, existingKeywords] = await Promise.all([
@@ -165,7 +165,7 @@ async function updateKeywords(tabId) {
     contextManager.getKeywords(tabId),
   ]);
 
-  if (sentences.length < 3) return;
+  if (!force && sentences.length < 3) return;
 
   try {
     const messages = buildKeywordPrompt(sentences, existingKeywords);
@@ -287,6 +287,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
       const { keyword } = message;
       contextManager.promoteKeyword(tid, keyword)
+        .then(kws => {
+          sendResponse({ success: true, data: { keywords: kws } });
+          // Notify content script of keyword update
+          try {
+            chrome.tabs.sendMessage(tid, { type: 'KEYWORDS_UPDATED', keywords: kws });
+          } catch {}
+        })
+        .catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+
+    case 'FORCE_UPDATE_KEYWORDS': {
+      const tid = _sender.tab?.id;
+      if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
+      updateKeywords(tid, true)
         .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
         .catch(e => sendResponse({ success: false, error: e.message }));
       return true;

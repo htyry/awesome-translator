@@ -244,6 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/^## (.+)$/gm, '<div class="popup-h2">$1</div>')
       .replace(/^### (.+)$/gm, '<div class="popup-h3">$1</div>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code class="popup-code">$1</code>')
       .replace(/\n/g, '<br>');
 
     // Render **Terms** section as a styled card
@@ -272,20 +273,48 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateKeywordsDisplay(keywords) {
+    const refreshBtn = '<span class="keywords-refresh" title="Force refresh keywords" id="kwRefresh">&#x21bb;</span>';
     if (!keywords || keywords.length === 0) {
-      keywordsBar.innerHTML = '<span class="keywords-label">Domain</span><span class="keywords-empty">accumulating...</span>';
+      keywordsBar.innerHTML = '<span class="keywords-label">Domain</span><span class="keywords-empty">accumulating...</span>' + refreshBtn;
+      keywordsBar.querySelector('#kwRefresh')?.addEventListener('click', forceRefreshKeywords);
       return;
     }
     const tagsHtml = keywords.map((kw, i) =>
       `<span class="keyword-tag kw-rank-${i}" data-keyword="${escapeHtml(kw)}" title="Click to boost relevance">${escapeHtml(kw)}</span>`
     ).join('');
-    keywordsBar.innerHTML = `<span class="keywords-label">Domain</span>${tagsHtml}`;
+    keywordsBar.innerHTML = `<span class="keywords-label">Domain</span>${tagsHtml}${refreshBtn}`;
     keywordsBar.querySelectorAll('.keyword-tag').forEach(tag => {
       tag.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', keyword: tag.dataset.keyword }, resp => {
-          if (resp?.success && resp.data?.keywords) updateKeywordsDisplay(resp.data.keywords);
+          if (resp?.success && resp.data?.keywords) {
+            updateKeywordsDisplay(resp.data.keywords);
+            // Re-translate with updated keyword order
+            if (sourceText.value.trim() && !isTranslating && currentMode !== 'quick') {
+              modeResults[currentMode] = null;
+              handleTranslate();
+            }
+          }
         });
       });
+    });
+    keywordsBar.querySelector('#kwRefresh')?.addEventListener('click', forceRefreshKeywords);
+  }
+
+  function forceRefreshKeywords() {
+    if (isTranslating) return;
+    const refreshEl = keywordsBar.querySelector('#kwRefresh');
+    if (refreshEl) refreshEl.textContent = '...';
+    chrome.runtime.sendMessage({ type: 'FORCE_UPDATE_KEYWORDS' }, resp => {
+      if (resp?.success && resp.data?.keywords) {
+        updateKeywordsDisplay(resp.data.keywords);
+        // Re-translate with updated keywords
+        if (sourceText.value.trim() && !isTranslating && currentMode !== 'quick') {
+          modeResults[currentMode] = null;
+          handleTranslate();
+        }
+      } else {
+        if (refreshEl) refreshEl.innerHTML = '&#x21bb;';
+      }
     });
   }
 

@@ -256,24 +256,40 @@ body {
   margin: 8px 0 3px;
 }
 
+.popup-code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  background: #f0f2f5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #c7254e;
+  word-break: break-word;
+}
+
+.result-box strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
 /* ─── Terms Card ─── */
 .terms-card {
   margin-top: 10px;
-  padding: 8px 10px;
-  background: #f8f9fa;
-  border-left: 3px solid #4a7dff;
+  padding: 10px 12px;
+  background: #eef3ff;
+  border-left: 3px solid #3b6bef;
   border-radius: 0 6px 6px 0;
   font-size: 12.5px;
   line-height: 1.8;
+  box-shadow: 0 1px 4px rgba(59, 107, 239, 0.1);
 }
 
 .term-item {
-  padding: 2px 0;
-  color: #444;
+  padding: 3px 0;
+  color: #2c3e50;
 }
 
 .term-item + .term-item {
-  border-top: 1px solid #eee;
+  border-top: 1px solid rgba(59, 107, 239, 0.12);
 }
 
 /* ─── Footer ─── */
@@ -357,6 +373,21 @@ body {
   font-size: 10px;
   color: #ccc;
   font-style: italic;
+}
+
+.keywords-refresh {
+  font-size: 12px;
+  color: #bbb;
+  cursor: pointer;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0 2px;
+  transition: color 0.15s;
+  user-select: none;
+}
+
+.keywords-refresh:hover {
+  color: #555;
 }
 
 /* ─── Utility ─── */
