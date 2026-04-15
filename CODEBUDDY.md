@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Awesome Translator is a Chrome Extension (Manifest V3) AI-powered translation agent. It provides three translation modes (Quick, Agent, Deep Analysis), context-aware translation with per-page conversation chains, rule-based intent classification (meaning vs. grammar), and streaming LLM output.
+Awesome Translator is a Chrome Extension (Manifest V3) AI-powered translation agent. It provides three translation modes (Quick, Agent, Deep Analysis), context-aware translation with domain keyword extraction, rule-based intent classification (meaning vs. grammar), and streaming LLM output.
 
 ## Common Commands
 
@@ -24,24 +24,28 @@ Create a ZIP of all project files (excluding node_modules if any) for Chrome Web
 
 ```
 ├── manifest.json          # Extension manifest V3 (ES module service worker)
-├── background.js          # Service worker - LLM streaming, context management, message routing
+├── background.js          # Service worker - LLM streaming, context management, keyword extraction, message routing
 ├── lib/                   # Shared business logic modules (ES modules)
 │   ├── llm-client.js      # OpenAI-compatible LLM client with SSE streaming
 │   ├── free-translate.js  # Free translation via Google Translate (no API key)
 │   ├── intent-classifier.js  # Rule-based intent classifier (meaning vs. grammar)
-│   ├── context-manager.js    # Per-tab, per-intent conversation chain manager
-│   └── prompt-templates.js   # System prompt builder for quick/agent/deep modes
+│   ├── context-manager.js    # Per-tab sentence storage + domain keyword management
+│   └── prompt-templates.js   # System prompt builder with keywords + sentences context, keyword extraction prompt
 ├── popup/                 # Extension popup UI (clicked from toolbar icon)
-│   ├── popup.html         # Popup markup with mode tabs and intent selector
+│   ├── popup.html         # Popup markup with mode tabs, intent selector, keyword bar
 │   ├── popup.css          # Popup styles
-│   └── popup.js           # Popup logic - mode switching, streaming, TTS
+│   └── popup.js           # Popup logic - mode switching, streaming, TTS, keyword display
 ├── content/               # Content scripts injected into web pages
-│   ├── content.js         # In-page translation panel with mode/intent switching, streaming, TTS
+│   ├── content.js         # In-page translation panel with mode/intent/keyword bar, streaming, TTS
 │   └── content.css        # Styles for injected UI elements (namespaced with `at-` prefix)
 ├── options/               # Options/settings page (full-page configuration UI)
 │   ├── options.html       # Settings page: LLM config, mode, intent, TTS, user profile
 │   ├── options.css        # Settings page styles
 │   └── options.js         # Settings persistence logic via chrome.storage.local
+├── stats/                 # Usage statistics dashboard
+│   ├── stats.html         # Stats page: daily breakdown, LLM config, CSV export
+│   ├── stats.css          # Stats page styles
+│   └── stats.js           # Stats data fetching, table rendering, CSV export
 └── assets/                # Icons (icon16.png, icon48.png, icon128.png)
 ```
 
@@ -50,26 +54,50 @@ Create a ZIP of all project files (excluding node_modules if any) for Chrome Web
 | Mode | Backend | Context | Description |
 |------|---------|---------|-------------|
 | **Quick** | Google Translate (free) | None | Fast simple translation, no LLM required |
-| **Agent** | LLM (streaming) | Page conversation chain | Context-aware translation with intent detection |
-| **Deep** | LLM (streaming) | Grammar conversation chain | Word analysis: etymology, roots, usage, examples |
+| **Agent** | LLM (streaming) | Keywords + recent sentences | Context-aware translation with domain keywords, intent detection, special noun annotation |
+| **Deep** | LLM (streaming) | Keywords + recent sentences | Word analysis: etymology, roots, usage, examples |
 
 ### Intent Classification
 
-Rule-based (no LLM call): text ≤3 words and ≤30 chars → `grammar`; otherwise → `meaning`. User can override to manual mode. Intent determines which conversation chain to use, keeping meaning and grammar contexts isolated.
+Rule-based (no LLM call): text ≤3 words and ≤30 chars → `grammar`; otherwise → `meaning`. User can override to manual mode. Intent determines which context bucket to use, keeping meaning and grammar contexts isolated.
 
 ### Context Management
 
-- Per-tab, per-intent isolated conversation chains stored in `chrome.storage.local`
-- Key format: `ctx:<tabId>` → `{ meaning: [...], grammar: [...] }`
+- Per-tab, per-intent isolated context stored in `chrome.storage.local`
+- Key format: `ctx:<tabId>` → `{ meaning: { sentences: [], keywords: [], totalTranslated: 0 }, grammar: {...} }`
+- **Only source sentences are stored** (not translations) — saves tokens
+- Domain keywords are extracted by LLM every 10 translations
+- 5 keywords maintained per intent, ranked by relevance
+- Users can click keywords in UI to promote rank (moves to front)
 - Tab close or navigation auto-clears context
-- Configurable history limit (default: 5 pairs)
+- Recent sentences (up to `contextHistoryLimit`) injected into system prompt for domain awareness
 - Optional user profile injected into system prompt
+
+### Keyword Extraction Flow
+
+1. After each translation, source sentence is saved to context
+2. When `totalTranslated` is a multiple of 10 (or first time reaching 3), LLM extracts 5 domain keywords
+3. Extraction prompt includes existing keywords + recent 20 sentences for refinement
+4. Keywords are stored and sent to frontend via port message
+5. Frontend displays keywords as ranked tags; clicking promotes a keyword
+6. `PROMOTE_KEYWORD` message moves keyword to front of array (higher rank = more relevance)
+
+### Prompt Construction
+
+System prompts use structured Markdown with `#` headings. Context section includes:
+- `# Target Language` — target language
+- `# Context` — domain keywords + recent sentences with clear instructions that sentences are for reference only
+- `# Constraint` — length limits
+- `# User Background` — optional user profile
+
+Keywords and recent sentences are embedded in the system prompt (not as separate messages), reducing token waste.
 
 ### Message Passing Pattern
 
-- **Simple messages**: `GET_TRANSLATION` (popup quick), `SAVE_SETTINGS`, `TEST_LLM`, `GET_LLM_STATUS`, `SETTINGS_UPDATED`
+- **Simple messages**: `GET_TRANSLATION`, `SAVE_SETTINGS`, `TEST_LLM`, `GET_LLM_STATUS`, `SETTINGS_UPDATED`, `GET_USAGE_STATS`, `RESET_USAGE_STATS`, `PROMOTE_KEYWORD`, `GET_KEYWORDS`
 - **Port streaming**: Content script ↔ Background via `chrome.runtime.connect({ name: 'translation' })` for agent/deep mode with SSE streaming
-- **Content script**: Listens for `SETTINGS_UPDATED`, `TRANSLATE_TEXT`, `GET_SELECTED_TEXT`, `TRIGGER_TRANSLATE`
+- **Port messages**: `translate` (request), `intent`/`chunk`/`result`/`done`/`error`/`keywords` (response)
+- **Content script listens**: `SETTINGS_UPDATED`, `TRANSLATE_TEXT`, `GET_SELECTED_TEXT`, `TRIGGER_TRANSLATE`, `KEYWORDS_UPDATED`
 
 ### LLM Configuration
 
