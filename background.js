@@ -283,7 +283,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
 
     case 'PROMOTE_KEYWORD': {
-      const { tabId: tid, intent, keyword } = message;
+      const tid = _sender.tab?.id;
+      if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
+      const { intent, keyword } = message;
       contextManager.promoteKeyword(tid, intent, keyword)
         .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
         .catch(e => sendResponse({ success: false, error: e.message }));
@@ -291,7 +293,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     case 'GET_KEYWORDS': {
-      const { tabId: tid, intent: kwIntent } = message;
+      const tid = _sender.tab?.id;
+      if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
+      const { intent: kwIntent } = message;
       contextManager.getKeywords(tid, kwIntent)
         .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
         .catch(e => sendResponse({ success: false, error: e.message }));

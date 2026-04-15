@@ -113,6 +113,11 @@
         send({ success: true });
         break;
       }
+      case 'KEYWORDS_UPDATED': {
+        if (msg.intent === currentIntent) updateKeywordsDisplay(msg.keywords);
+        send({ success: true });
+        break;
+      }
       default:
         send({ success: false });
     }
@@ -244,6 +249,10 @@
       </div>
       <div class="at-mode-tabs">${modeTabs}</div>
       <div class="at-intent-row ${currentMode === MODES.QUICK ? 'at-hidden' : ''}">${intentRow}</div>
+      <div class="at-keywords-bar ${currentMode === MODES.QUICK ? 'at-hidden' : ''}" id="atKeywordsBar">
+        <span class="at-keywords-label">Domain</span>
+        <span class="at-keywords-empty">translating...</span>
+      </div>
       <div class="at-panel-body">
         <div class="at-result"></div>
       </div>
@@ -286,6 +295,31 @@
     detectedIntent = null;
   }
 
+  function updateKeywordsDisplay(keywords) {
+    const bar = panel?.querySelector('#atKeywordsBar');
+    if (!bar) return;
+    if (!keywords || keywords.length === 0) {
+      bar.innerHTML = '<span class="at-keywords-label">Domain</span><span class="at-keywords-empty">accumulating...</span>';
+      return;
+    }
+    const tagsHtml = keywords.map((kw, i) =>
+      `<span class="at-keyword-tag at-kw-rank-${i}" data-keyword="${escapeHtml(kw)}" title="Click to boost relevance">${escapeHtml(kw)}</span>`
+    ).join('');
+    bar.innerHTML = `<span class="at-keywords-label">Domain</span>${tagsHtml}`;
+    bar.querySelectorAll('.at-keyword-tag').forEach(tag => {
+      tag.addEventListener('click', () => promoteKeyword(tag.dataset.keyword));
+    });
+  }
+
+  function promoteKeyword(keyword) {
+    if (!currentIntent || !keyword) return;
+    chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', intent: currentIntent, keyword }, resp => {
+      if (resp?.success && resp.data?.keywords) {
+        updateKeywordsDisplay(resp.data.keywords);
+      }
+    });
+  }
+
   function switchMode(mode) {
     if (isTranslating) return;
     currentMode = mode;
@@ -293,6 +327,7 @@
       t.classList.toggle('at-active', t.dataset.mode === mode)
     );
     panel.querySelector('.at-intent-row')?.classList.toggle('at-hidden', mode === MODES.QUICK);
+    panel.querySelector('#atKeywordsBar')?.classList.toggle('at-hidden', mode === MODES.QUICK);
 
     const resultEl = panel.querySelector('.at-result');
 
@@ -398,6 +433,7 @@
             resultEl.innerHTML = formatContent(msg.content || full);
             resultEl.className = 'at-result';
             modeResults[currentMode] = resultEl.innerHTML;
+            if (msg.keywords) updateKeywordsDisplay(msg.keywords);
             break;
 
           case 'error':

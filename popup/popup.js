@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const intentRow = document.getElementById('intentRow');
   const intentBadge = document.getElementById('intentBadge');
   const intentSwitch = document.getElementById('intentSwitch');
+  const keywordsBar = document.getElementById('keywordsBar');
   const llmStatus = document.getElementById('llmStatus');
   const ttsBtn = document.getElementById('ttsBtn');
   const ttsStopBtn = document.getElementById('ttsStopBtn');
@@ -38,8 +39,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isTranslating) return;
       currentMode = tab.dataset.mode;
       modeTabs.forEach(t => t.classList.toggle('active', t === tab));
-      // Show/hide intent row
+      // Show/hide intent row and keywords bar
       intentRow.classList.toggle('hidden', currentMode === 'quick');
+      keywordsBar.classList.toggle('hidden', currentMode === 'quick');
 
       // Show cached result if available, otherwise clear
       if (modeResults[currentMode]) {
@@ -140,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
             resultBox.className = 'result-box has-result';
             copyBtn.style.display = 'inline-flex';
             modeResults[currentMode] = resultBox.innerHTML;
+            if (msg.keywords) updateKeywordsDisplay(msg.keywords);
             disconnectPort();
             break;
 
@@ -251,6 +254,25 @@ document.addEventListener('DOMContentLoaded', () => {
     return d.innerHTML;
   }
 
+  function updateKeywordsDisplay(keywords) {
+    if (!keywords || keywords.length === 0) {
+      keywordsBar.innerHTML = '<span class="keywords-label">Domain</span><span class="keywords-empty">accumulating...</span>';
+      return;
+    }
+    const tagsHtml = keywords.map((kw, i) =>
+      `<span class="keyword-tag kw-rank-${i}" data-keyword="${escapeHtml(kw)}" title="Click to boost relevance">${escapeHtml(kw)}</span>`
+    ).join('');
+    keywordsBar.innerHTML = `<span class="keywords-label">Domain</span>${tagsHtml}`;
+    keywordsBar.querySelectorAll('.keyword-tag').forEach(tag => {
+      tag.addEventListener('click', () => {
+        if (!currentIntent) return;
+        chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', intent: currentIntent, keyword: tag.dataset.keyword }, resp => {
+          if (resp?.success && resp.data?.keywords) updateKeywordsDisplay(resp.data.keywords);
+        });
+      });
+    });
+  }
+
   async function getSelectedText() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -293,6 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Intent row visibility
       intentRow.classList.toggle('hidden', initialMode === 'quick');
+      keywordsBar.classList.toggle('hidden', initialMode === 'quick');
 
       // Intent mode: auto → badge, manual → switch
       if (settings.intentMode === 'manual') {
