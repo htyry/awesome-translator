@@ -33,10 +33,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function render(data) {
     // Summary totals
     let tCalls = 0, tIn = 0, tOut = 0, tLLM = 0;
-    let tQuick = 0, tAgent = 0, tDeep = 0;
-
-    // LLM model tracking
-    const modelMap = {};  // { model: count }
+    let tQuick = 0;
+    const modelMap = {};   // { modelName: { count, inputChars, outputChars, endpoint } }
     const endpointMap = {}; // { endpoint: count }
 
     for (const d of data) {
@@ -44,15 +42,21 @@ document.addEventListener('DOMContentLoaded', () => {
       tIn += d.inputChars || 0;
       tOut += d.outputChars || 0;
       const q = d.quickCount || 0;
-      const a = d.agentCount || 0;
-      const dp = d.deepCount || 0;
       tQuick += q;
-      tAgent += a;
-      tDeep += dp;
-      tLLM += a + dp;
+      tLLM += (d.agentCount || 0) + (d.deepCount || 0);
 
-      if (d.llmModel) modelMap[d.llmModel] = (modelMap[d.llmModel] || 0) + (a + dp);
-      if (d.llmEndpoint) endpointMap[d.llmEndpoint] = (endpointMap[d.llmEndpoint] || 0) + (a + dp);
+      if (d.models && typeof d.models === 'object' && Object.keys(d.models).length > 0) {
+        for (const [modelName, modelData] of Object.entries(d.models)) {
+          if (!modelMap[modelName]) {
+            modelMap[modelName] = { count: 0, inputChars: 0, outputChars: 0, endpoint: modelData.endpoint || '' };
+          }
+          modelMap[modelName].count += modelData.count || 0;
+          modelMap[modelName].inputChars += modelData.inputChars || 0;
+          modelMap[modelName].outputChars += modelData.outputChars || 0;
+          const ep = modelData.endpoint || '';
+          if (ep) endpointMap[ep] = (endpointMap[ep] || 0) + (modelData.count || 0);
+        }
+      }
     }
 
     totalCallsEl.textContent = tCalls;
@@ -60,73 +64,89 @@ document.addEventListener('DOMContentLoaded', () => {
     totalInEl.textContent = fmtChars(tIn);
     totalOutEl.textContent = fmtChars(tOut);
 
-    // Daily table
-    const rows = data.map(d => {
+    // Build per-model rows grouped by date
+    const rows = [];
+    for (const d of data) {
       const q = d.quickCount || 0;
-      const a = d.agentCount || 0;
-      const dp = d.deepCount || 0;
-      return `<tr>
-        <td class="cell-date">${d.date}</td>
-        <td class="cell-num">${d.count || 0}</td>
-        <td class="cell-num">${q}</td>
-        <td class="cell-num">${a}</td>
-        <td class="cell-num">${dp}</td>
-        <td class="cell-num">${fmtChars(d.inputChars || 0)}</td>
-        <td class="cell-num">${fmtChars(d.outputChars || 0)}</td>
-        <td class="cell-model" title="${escapeAttr(d.llmModel || '-')}">${d.llmModel || '-'}</td>
-        <td class="cell-endpoint" title="${escapeAttr(d.llmEndpoint || '-')}">${shortenEndpoint(d.llmEndpoint)}</td>
-      </tr>`;
-    }).join('');
+      const models = d.models || {};
+      const modelEntries = Object.entries(models)
+        .sort((x, y) => (y[1].count || 0) - (x[1].count || 0));
+
+      let isFirst = true;
+
+      // Per-model LLM rows
+      for (const [modelName, mData] of modelEntries) {
+        rows.push(`<tr>
+          <td class="cell-date">${isFirst ? d.date : ''}</td>
+          <td class="cell-model" title="${escapeAttr(modelName)}">${escapeHTML(modelName)}</td>
+          <td class="cell-num">${mData.count || 0}</td>
+          <td class="cell-num">${fmtChars(mData.inputChars || 0)}</td>
+          <td class="cell-num">${fmtChars(mData.outputChars || 0)}</td>
+          <td class="cell-endpoint" title="${escapeAttr(mData.endpoint || '')}">${shortenEndpoint(mData.endpoint)}</td>
+        </tr>`);
+        isFirst = false;
+      }
+
+      // Quick row (if any quick calls)
+      if (q > 0) {
+        const modelIn = modelEntries.reduce((s, [, m]) => s + (m.inputChars || 0), 0);
+        const modelOut = modelEntries.reduce((s, [, m]) => s + (m.outputChars || 0), 0);
+        const quickIn = Math.max(0, (d.inputChars || 0) - modelIn);
+        const quickOut = Math.max(0, (d.outputChars || 0) - modelOut);
+
+        rows.push(`<tr class="quick-row">
+          <td class="cell-date">${isFirst ? d.date : ''}</td>
+          <td class="cell-model">Google Translate</td>
+          <td class="cell-num">${q}</td>
+          <td class="cell-num">${fmtChars(quickIn)}</td>
+          <td class="cell-num">${fmtChars(quickOut)}</td>
+          <td class="cell-endpoint">translate.googleapis.com</td>
+        </tr>`);
+      }
+    }
 
     dailyTableEl.innerHTML = `
       <table class="stats-table">
         <thead>
           <tr>
             <th>Date</th>
-            <th style="text-align:right">Total</th>
-            <th style="text-align:right">Quick</th>
-            <th style="text-align:right">Agent</th>
-            <th style="text-align:right">Deep</th>
+            <th>Model</th>
+            <th style="text-align:right">Calls</th>
             <th style="text-align:right">In</th>
             <th style="text-align:right">Out</th>
-            <th>Model</th>
             <th>Endpoint</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows.join('')}</tbody>
         <tfoot>
           <tr>
-            <td style="font-weight:600">Total</td>
+            <td colspan="2" style="font-weight:600">Total</td>
             <td class="cell-num">${tCalls}</td>
-            <td class="cell-num">${tQuick}</td>
-            <td class="cell-num">${tAgent}</td>
-            <td class="cell-num">${tDeep}</td>
             <td class="cell-num">${fmtChars(tIn)}</td>
             <td class="cell-num">${fmtChars(tOut)}</td>
-            <td class="cell-model">${getTopKey(modelMap)}</td>
-            <td class="cell-endpoint">${shortenEndpoint(getTopKey(endpointMap))}</td>
+            <td></td>
           </tr>
         </tfoot>
       </table>`;
 
     // LLM Info panel
-    const topModel = getTopKey(modelMap);
+    const topModel = getTopKey(modelMap, 'count');
     const topEndpoint = getTopKey(endpointMap);
     const modelCount = Object.keys(modelMap).length;
     const endpointCount = Object.keys(endpointMap).length;
 
     llmInfoEl.innerHTML = `
       <div class="llm-info-item">
-        <div class="llm-info-label">Current Model</div>
+        <div class="llm-info-label">Most Used Model</div>
         <div class="llm-info-value">${topModel || 'Not configured'}</div>
       </div>
       <div class="llm-info-item">
         <div class="llm-info-label">Models Used</div>
-        <div class="llm-info-value">${modelCount ? modelCount + ' unique: ' + Object.entries(modelMap).map(([k, v]) => `${k} (${v})`).join(', ') : 'None'}</div>
+        <div class="llm-info-value">${modelCount ? modelCount + ' unique: ' + Object.entries(modelMap).map(([k, v]) => `${k} (${v.count})`).join(', ') : 'None'}</div>
       </div>
       <div class="llm-info-item">
-        <div class="llm-info-label">Current Endpoint</div>
-        <div class="llm-info-value">${topEndpoint || 'Not configured'}</div>
+        <div class="llm-info-label">Most Used Endpoint</div>
+        <div class="llm-info-value">${shortenEndpoint(topEndpoint) || 'Not configured'}</div>
       </div>
       <div class="llm-info-item">
         <div class="llm-info-label">Endpoints Used</div>
@@ -167,18 +187,27 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('No data to export.');
         return;
       }
-      const header = 'Date,Total,Quick,Agent,Deep,Input Chars,Output Chars,LLM Model,Endpoint';
-      const rows = resp.data.map(d => [
-        d.date,
-        d.count || 0,
-        d.quickCount || 0,
-        d.agentCount || 0,
-        d.deepCount || 0,
-        d.inputChars || 0,
-        d.outputChars || 0,
-        `"${(d.llmModel || '').replace(/"/g, '""')}"`,
-        `"${(d.llmEndpoint || '').replace(/"/g, '""')}"`,
-      ].join(','));
+      const header = 'Date,Model,Calls,Input Chars,Output Chars,Endpoint';
+      const rows = [];
+      for (const d of resp.data) {
+        const q = d.quickCount || 0;
+        const models = d.models || {};
+        const modelEntries = Object.entries(models)
+          .sort((x, y) => (y[1].count || 0) - (x[1].count || 0));
+        for (const [modelName, mData] of modelEntries) {
+          rows.push([
+            d.date,
+            `"${modelName.replace(/"/g, '""')}"`,
+            mData.count || 0,
+            mData.inputChars || 0,
+            mData.outputChars || 0,
+            `"${(mData.endpoint || '').replace(/"/g, '""')}"`,
+          ].join(','));
+        }
+        if (q > 0) {
+          rows.push([d.date, 'Google Translate', q, '', '', 'translate.googleapis.com'].join(','));
+        }
+      }
       const csv = [header, ...rows].join('\n');
       const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -206,8 +235,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return String(n);
   }
 
-  function getTopKey(map) {
+  function getTopKey(map, countField = null) {
     if (!Object.keys(map).length) return '';
+    if (countField) {
+      return Object.entries(map).sort((a, b) => (b[1][countField] || 0) - (a[1][countField] || 0))[0][0];
+    }
     return Object.entries(map).sort((a, b) => b[1] - a[1])[0][0];
   }
 
@@ -223,5 +255,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function escapeAttr(str) {
     return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function escapeHTML(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 });

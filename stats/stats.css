@@ -169,6 +169,17 @@ body {
   white-space: nowrap;
 }
 
+.quick-row td {
+  color: #999;
+  font-style: italic;
+}
+
+.quick-row .cell-model {
+  color: #4285f4;
+  font-style: normal;
+  font-weight: 500;
+}
+
 tfoot td {
   padding: 9px 12px;
   border-top: 2px solid #e0e0e0;
