@@ -5,7 +5,7 @@ import { LLMClient } from './lib/llm-client.js';
 import { freeTranslate } from './lib/free-translate.js';
 import { classifyIntent } from './lib/intent-classifier.js';
 import { ContextManager } from './lib/context-manager.js';
-import { buildMessages } from './lib/prompt-templates.js';
+import { buildMessages, buildKeywordPrompt } from './lib/prompt-templates.js';
 
 // ─── State ───
 let llmClient = null;
@@ -103,26 +103,29 @@ chrome.runtime.onConnect.addListener(port => {
       const detected = intent || classifyIntent(text);
       port.postMessage({ type: 'intent', intent: detected });
 
-      // Build context and settings
+      // Build context: keywords + recent sentences
       const s = await chrome.storage.local.get([
         'contextHistoryLimit', 'userProfile',
         'customPrompt_agent_meaning', 'customPrompt_agent_grammar', 'customPrompt_deep',
       ]);
-      const limit = s.contextHistoryLimit || 5;
+      const limit = s.contextHistoryLimit || 10;
       const profile = s.userProfile || '';
       const customPrompts = {
         agent_meaning: s.customPrompt_agent_meaning || '',
         agent_grammar: s.customPrompt_agent_grammar || '',
         deep: s.customPrompt_deep || '',
       };
-      // Filter out empty custom prompts
       Object.keys(customPrompts).forEach(k => { if (!customPrompts[k]) delete customPrompts[k]; });
 
-      // Get context as message array (not formatted string)
-      const ctxHistory = await contextManager.getContext(tabId, detected, limit);
+      const [keywords, sentences] = await Promise.all([
+        contextManager.getKeywords(tabId, detected),
+        contextManager.getSentences(tabId, detected, limit),
+      ]);
 
-      // Build LLM messages
-      const messages = buildMessages(mode, detected, text, targetLang, ctxHistory, profile, customPrompts);
+      const context = { keywords, sentences };
+
+      // Build LLM messages (system prompt has context embedded)
+      const messages = buildMessages(mode, detected, text, targetLang, context, profile, customPrompts);
 
       // Stream response
       let full = '';
@@ -131,14 +134,20 @@ chrome.runtime.onConnect.addListener(port => {
         port.postMessage({ type: 'chunk', content: chunk });
       }
 
-      // Save to conversation chain
-      await contextManager.addMessage(tabId, detected, 'user', text);
-      await contextManager.addMessage(tabId, detected, 'assistant', full);
+      // Record source sentence (not the full translation — saves tokens)
+      const shouldUpdate = await contextManager.addSentence(tabId, detected, text);
 
       // Record usage
       recordUsage(mode, text.length, full.length);
 
-      port.postMessage({ type: 'done', content: full });
+      // Send keywords to frontend for display
+      const currentKeywords = await contextManager.getKeywords(tabId, detected);
+      port.postMessage({ type: 'done', content: full, keywords: currentKeywords });
+
+      // Background keyword update (non-blocking)
+      if (shouldUpdate && llmClient) {
+        updateKeywords(tabId, detected).catch(() => {});
+      }
     } catch (e) {
       if (e.name !== 'AbortError') {
         port.postMessage({ type: 'error', error: e.message });
@@ -147,9 +156,46 @@ chrome.runtime.onConnect.addListener(port => {
   });
 });
 
+// ─── Keyword extraction (background, non-blocking) ───
+async function updateKeywords(tabId, intent) {
+  if (!llmClient) return;
+
+  const [sentences, existingKeywords] = await Promise.all([
+    contextManager.getSentences(tabId, intent, 20),
+    contextManager.getKeywords(tabId, intent),
+  ]);
+
+  if (sentences.length < 3) return;
+
+  try {
+    const messages = buildKeywordPrompt(sentences, existingKeywords);
+    const result = await llmClient.chat(messages, { maxTokens: 200 });
+
+    // Parse JSON array from response
+    let keywords = [];
+    const jsonMatch = result.match(/\[[\s\S]*?\]/);
+    if (jsonMatch) {
+      keywords = JSON.parse(jsonMatch[0]);
+    }
+
+    if (Array.isArray(keywords) && keywords.length > 0) {
+      // Clean up: ensure strings only
+      keywords = keywords.filter(k => typeof k === 'string').slice(0, 5);
+      await contextManager.updateKeywords(tabId, intent, keywords);
+
+      // Notify content script about keyword update
+      try {
+        chrome.tabs.sendMessage(tabId, { type: 'KEYWORDS_UPDATED', intent, keywords });
+      } catch {}
+    }
+  } catch (e) {
+    console.warn('Keyword extraction failed:', e.message);
+  }
+}
+
 // ─── API Usage Tracking ───
 async function recordUsage(mode, inputChars, outputChars) {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = new Date().toISOString().slice(0, 10);
   const key = `usage_${today}`;
   const result = await chrome.storage.local.get(key);
   const data = result[key] || {
@@ -164,7 +210,6 @@ async function recordUsage(mode, inputChars, outputChars) {
   else if (mode === 'agent') data.agentCount++;
   else if (mode === 'deep') data.deepCount++;
 
-  // Track LLM info for LLM-based modes
   if (mode !== 'quick' && llmClient) {
     const cfg = llmClient.getConfig();
     data.llmModel = cfg.model || '';
@@ -193,7 +238,7 @@ async function resetUsageStats() {
   return keys.length;
 }
 
-// ─── Simple message handler (popup quick-translate, save settings, test LLM) ───
+// ─── Simple message handler ───
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
     case 'GET_TRANSLATION': {
@@ -201,13 +246,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       freeTranslate(message.text, targetLang)
         .then(result => sendResponse({ success: true, data: { translatedText: result } }))
         .catch(err => sendResponse({ success: false, error: err.message }));
-      return true; // async
+      return true;
     }
 
     case 'SAVE_SETTINGS':
       chrome.storage.local.set(message.settings, () => {
         sendResponse({ success: true });
-        init(); // re-create LLM client with new config
+        init();
       });
       return true;
 
@@ -236,6 +281,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'RESET_USAGE_STATS':
       resetUsageStats().then(count => sendResponse({ success: true, data: { deleted: count } }));
       return true;
+
+    case 'PROMOTE_KEYWORD': {
+      const { tabId: tid, intent, keyword } = message;
+      contextManager.promoteKeyword(tid, intent, keyword)
+        .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
+        .catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+
+    case 'GET_KEYWORDS': {
+      const { tabId: tid, intent: kwIntent } = message;
+      contextManager.getKeywords(tid, kwIntent)
+        .then(kws => sendResponse({ success: true, data: { keywords: kws } }))
+        .catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
 
     default:
       sendResponse({ success: false, error: 'Unknown message type' });
