@@ -130,6 +130,7 @@
   document.addEventListener('mouseup', e => {
     // Ignore clicks inside panel/trigger — don't let selection-clear hide them
     if (panel?.contains(e.target) || triggerBtn?.contains(e.target)) return;
+    const cx = e.clientX, cy = e.clientY;
     setTimeout(() => {
       if (_isFromBtn) { _isFromBtn = false; return; }
       const sel = window.getSelection().toString().trim();
@@ -137,10 +138,10 @@
         hideTriggerBtn(); hidePanel(); return;
       }
       if (settings.autoTranslate) {
-        showPanel(sel, e.pageX, e.pageY);
+        showPanel(sel, cx, cy);
       } else if (settings.showTriggerIcon) {
         hidePanel();
-        showTriggerBtn(sel, e.pageX, e.pageY);
+        showTriggerBtn(sel, cx, cy);
       } else {
         hideAll();
       }
@@ -183,9 +184,8 @@
     triggerBtn.title = 'Click to translate';
 
     let px = x + 8, py = y + 8;
-    const mxW = window.innerWidth + window.scrollX, mxH = window.innerHeight + window.scrollY;
-    if (px + 32 > mxW - 5) px = mxW - 37;
-    if (py + 32 > mxH - 5) py = y - 40;
+    if (px + 32 > window.innerWidth - 5) px = window.innerWidth - 37;
+    if (py + 32 > window.innerHeight - 5) py = y - 40;
     triggerBtn.style.left = px + 'px';
     triggerBtn.style.top = py + 'px';
     document.body.appendChild(triggerBtn);
@@ -206,8 +206,8 @@
     if (!x || !y) {
       try {
         const r = window.getSelection().getRangeAt(0).getBoundingClientRect();
-        x = r.left + r.width / 2 + window.scrollX;
-        y = r.bottom + window.scrollY + 5;
+        x = r.left + r.width / 2;
+        y = r.bottom + 5;
       } catch { x = 200; y = 200; }
     }
     showPanel(text, x, y);
@@ -266,10 +266,14 @@
       </div>
     `;
 
-    const pos = calcPos(x, y);
+    const pos = calcPos(x, y, null);
     panel.style.left = pos.x + 'px';
     panel.style.top = pos.y + 'px';
     document.body.appendChild(panel);
+
+    // Reposition after render so we use actual panel height
+    const pos2 = calcPos(x, y, panel);
+    if (pos2.y !== pos.y) panel.style.top = pos2.y + 'px';
 
     // Bind events
     panel.querySelector('.at-close-btn').addEventListener('click', hidePanel);
@@ -284,6 +288,9 @@
     panel.querySelector('.at-copy-btn')?.addEventListener('click', copyResult);
     panel.querySelector('.at-tts-btn').addEventListener('click', () => speakOriginal(text));
     panel.querySelector('.at-tts-stop-btn').addEventListener('click', stopSpeaking);
+
+    // Make panel draggable via header
+    enableDrag(panel, panel.querySelector('.at-panel-header'));
 
     // Start translation
     requestTranslation();
@@ -591,15 +598,42 @@
   // ════════════════════════════════════════
   function hideAll() { hidePanel(); hideTriggerBtn(); }
 
-  function calcPos(x, y) {
-    // x, y are page-relative (already include scrollX/scrollY)
-    const pw = 380, ph = 300;
-    const viewBottom = window.scrollY + window.innerHeight;
-    const viewRight = window.scrollX + window.innerWidth;
-    let px = Math.max(window.scrollX + 5, Math.min(x - pw / 2, viewRight - pw - 10));
-    let py = y + 15;
-    if (settings.bubblePosition === 'above' || (py + ph > viewBottom)) {
-      py = Math.max(window.scrollY + 5, y - ph - 10);
+  // ─── Drag ───
+  function enableDrag(el, handle) {
+    let startX, startY, origLeft, origTop;
+    handle.addEventListener('mousedown', e => {
+      if (e.target.closest('.at-close-btn')) return;
+      e.preventDefault();
+      startX = e.clientX;
+      startY = e.clientY;
+      origLeft = el.offsetLeft;
+      origTop = el.offsetTop;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    function onMove(e) {
+      el.style.left = (origLeft + e.clientX - startX) + 'px';
+      el.style.top = (origTop + e.clientY - startY) + 'px';
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+  }
+
+  function calcPos(clientX, clientY, panelEl) {
+    const pw = 380;
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    let px = Math.max(5, Math.min(clientX - pw / 2, vw - pw - 10));
+    let py = clientY + 15;
+
+    // Use actual panel height or estimate
+    const ph = panelEl ? panelEl.offsetHeight : 300;
+    const maxH = Math.round(vh * 0.8);
+
+    if (settings.bubblePosition === 'above' || (py + Math.min(ph, maxH) > vh)) {
+      py = Math.max(5, clientY - Math.min(ph, maxH) - 10);
     }
     return { x: px, y: py };
   }

@@ -167,7 +167,11 @@ chrome.runtime.onConnect.addListener(port => {
 
       // Stream response
       let full = '';
-      for await (const chunk of llmClient.chatStream(messages, { signal: abortCtrl.signal })) {
+      let tokenUsage = null;
+      for await (const chunk of llmClient.chatStream(messages, {
+        signal: abortCtrl.signal,
+        onUsage: (u) => { tokenUsage = u; },
+      })) {
         full += chunk;
         port.postMessage({ type: 'chunk', content: chunk });
       }
@@ -175,9 +179,9 @@ chrome.runtime.onConnect.addListener(port => {
       // Record source sentence (not the full translation — saves tokens)
       const shouldUpdate = await contextManager.addSentence(tabId, detected, text);
 
-      // Record usage — include system prompt chars for accurate token estimation
+      // Record usage with token data
       const systemPromptChars = messages[0]?.content?.length || 0;
-      recordUsage(mode, text.length, full.length, systemPromptChars);
+      recordUsage(mode, text.length, full.length, systemPromptChars, tokenUsage);
 
       // Send shared keywords to frontend for display
       const currentKeywords = await contextManager.getKeywords(tabId);
@@ -199,8 +203,12 @@ chrome.runtime.onConnect.addListener(port => {
 async function updateKeywords(tabId, force = false, targetLang = 'zh') {
   if (!llmClient) return;
 
+  // Read configurable interval to determine how many sentences to include
+  const cfg = await chrome.storage.local.get('keywordUpdateInterval');
+  const interval = cfg.keywordUpdateInterval || 10;
+
   const [sentences, existingKeywords] = await Promise.all([
-    contextManager.getAllSentences(tabId, 20),
+    contextManager.getAllSentences(tabId, interval),
     contextManager.getKeywords(tabId),
   ]);
 
@@ -208,7 +216,7 @@ async function updateKeywords(tabId, force = false, targetLang = 'zh') {
 
   try {
     const messages = buildKeywordPrompt(sentences, existingKeywords, targetLang);
-    const result = await llmClient.chat(messages, { maxTokens: 300 });
+    const { content: result } = await llmClient.chat(messages, { maxTokens: 300 });
 
     // Parse JSON array from response
     let keywords = [];
@@ -237,16 +245,21 @@ async function updateKeywords(tabId, force = false, targetLang = 'zh') {
 }
 
 // ─── API Usage Tracking ───
-// Per-day totals key: usage_YYYY-MM-DD -> { count, inputChars, outputChars, quickCount, agentCount, deepCount }
-// Per-model-per-day key: usage_YYYY-MM-DD:modelName -> { count, inputChars, outputChars, endpoint }
-// This eliminates read-modify-write races between different models.
+// Per-day totals key: usage_YYYY-MM-DD -> { count, inputChars, outputChars, quickCount, agentCount, deepCount, inputTokens, outputTokens, cachedTokens }
+// Per-model-per-day key: usage_YYYY-MM-DD:modelName -> { count, inputChars, outputChars, endpoint, inputTokens, outputTokens, cachedTokens }
 
 function usageKey(date) { return `usage_${date}`; }
 function modelUsageKey(date, model) { return `usage_${date}:${model}`; }
 
-function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0) {
+function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, tokenUsage = null) {
   const today = new Date().toISOString().slice(0, 10);
   const totalInputChars = inputChars + (mode !== 'quick' ? systemPromptChars : 0);
+
+  // Extract token counts from API response
+  const inputTokens = tokenUsage?.prompt_tokens || 0;
+  const outputTokens = tokenUsage?.completion_tokens || 0;
+  // OpenAI cached tokens: prompt_tokens_details.cached_tokens
+  const cachedTokens = tokenUsage?.prompt_tokens_details?.cached_tokens || 0;
 
   // Update daily totals (read-modify-write, but each field is additive so safe)
   const dayKey = usageKey(today);
@@ -254,6 +267,7 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0) {
     const data = result[dayKey] || {
       count: 0, inputChars: 0, outputChars: 0,
       quickCount: 0, agentCount: 0, deepCount: 0,
+      inputTokens: 0, outputTokens: 0, cachedTokens: 0,
     };
     data.count++;
     data.inputChars += totalInputChars;
@@ -261,6 +275,9 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0) {
     if (mode === 'quick') data.quickCount++;
     else if (mode === 'agent') data.agentCount++;
     else if (mode === 'deep') data.deepCount++;
+    data.inputTokens = (data.inputTokens || 0) + inputTokens;
+    data.outputTokens = (data.outputTokens || 0) + outputTokens;
+    data.cachedTokens = (data.cachedTokens || 0) + cachedTokens;
     // Strip legacy fields to keep daily key clean
     delete data.models;
     delete data.llmModel;
@@ -280,20 +297,34 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0) {
 
     const mKey = modelUsageKey(today, modelName);
     chrome.storage.local.get(mKey, (result) => {
-      const mData = result[mKey] || { count: 0, inputChars: 0, outputChars: 0, endpoint: endpointUrl };
+      const mData = result[mKey] || { count: 0, inputChars: 0, outputChars: 0, endpoint: endpointUrl, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
       mData.count++;
       mData.inputChars += totalInputChars;
       mData.outputChars += outputChars;
       if (endpointUrl && !mData.endpoint) mData.endpoint = endpointUrl;
+      mData.inputTokens = (mData.inputTokens || 0) + inputTokens;
+      mData.outputTokens = (mData.outputTokens || 0) + outputTokens;
+      mData.cachedTokens = (mData.cachedTokens || 0) + cachedTokens;
       chrome.storage.local.set({ [mKey]: mData });
     });
   }
 }
 
-async function getUsageStats() {
+async function getUsageStats(query = {}) {
   const all = await chrome.storage.local.get(null);
-  const dayMap = {};     // { date: { count, inputChars, outputChars, quickCount, agentCount, deepCount } }
-  const modelDayMap = {}; // { date: { modelName: { count, inputChars, outputChars, endpoint } } }
+
+  // Opportunistic cleanup: remove orphaned ctx: keys for tabs that no longer exist
+  const ctxKeys = Object.keys(all).filter(k => k.startsWith('ctx:'));
+  if (ctxKeys.length > 0) {
+    const tabIds = new Set((await chrome.tabs.query({})).map(t => String(t.id)));
+    const orphaned = ctxKeys.filter(k => !tabIds.has(k.slice(4)));
+    if (orphaned.length) {
+      chrome.storage.local.remove(orphaned); // fire-and-forget
+    }
+  }
+
+  const dayMap = {};     // { date: { count, inputChars, outputChars, quickCount, agentCount, deepCount, inputTokens, outputTokens, cachedTokens } }
+  const modelDayMap = {}; // { date: { modelName: { count, inputChars, outputChars, endpoint, inputTokens, outputTokens, cachedTokens } } }
   const legacyDates = new Set(); // Track dates that had legacy fields
 
   for (const key of Object.keys(all)) {
@@ -304,13 +335,16 @@ async function getUsageStats() {
     const dayMatch = key.match(/^usage_(\d{4}-\d{2}-\d{2})$/);
     if (dayMatch) {
       const date = dayMatch[1];
-      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0 };
+      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
       dayMap[date].count += val.count || 0;
       dayMap[date].inputChars += val.inputChars || 0;
       dayMap[date].outputChars += val.outputChars || 0;
       dayMap[date].quickCount += val.quickCount || 0;
       dayMap[date].agentCount += val.agentCount || 0;
       dayMap[date].deepCount += val.deepCount || 0;
+      dayMap[date].inputTokens += val.inputTokens || 0;
+      dayMap[date].outputTokens += val.outputTokens || 0;
+      dayMap[date].cachedTokens += val.cachedTokens || 0;
 
       // Mark dates with legacy fields for later cleanup
       if (val.models || val.llmModel) {
@@ -362,6 +396,7 @@ async function getUsageStats() {
           inputChars: dayVal.inputChars || 0,
           outputChars: dayVal.outputChars || 0,
           endpoint: dayVal.llmEndpoint || '',
+          inputTokens: 0, outputTokens: 0, cachedTokens: 0,
         };
         toWrite[mKey] = modelDayMap[date][mName];
       }
@@ -375,6 +410,9 @@ async function getUsageStats() {
       quickCount: dayVal.quickCount || 0,
       agentCount: dayVal.agentCount || 0,
       deepCount: dayVal.deepCount || 0,
+      inputTokens: dayVal.inputTokens || 0,
+      outputTokens: dayVal.outputTokens || 0,
+      cachedTokens: dayVal.cachedTokens || 0,
     };
   }
 
@@ -386,13 +424,52 @@ async function getUsageStats() {
     await chrome.storage.local.set(toClean);
   }
 
+  // Apply query filters
+  let dates = new Set([...Object.keys(dayMap), ...Object.keys(modelDayMap)]);
+  if (query.model) {
+    // Only include dates that have the specified model
+    const filteredDates = new Set();
+    for (const date of dates) {
+      if (modelDayMap[date] && modelDayMap[date][query.model]) {
+        filteredDates.add(date);
+      }
+    }
+    dates = filteredDates;
+  }
+  if (query.startDate) {
+    dates = new Set([...dates].filter(d => d >= query.startDate));
+  }
+  if (query.endDate) {
+    dates = new Set([...dates].filter(d => d <= query.endDate));
+  }
+
   // Merge into final stats array
-  const dates = new Set([...Object.keys(dayMap), ...Object.keys(modelDayMap)]);
   const stats = [];
   for (const date of dates) {
-    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0 };
-    const models = modelDayMap[date] || {};
-    stats.push({ date, ...day, models });
+    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+    let models = modelDayMap[date] || {};
+
+    // If filtering by model, restrict models and recalculate day totals from model data
+    if (query.model) {
+      const mData = models[query.model];
+      if (!mData) continue;
+      models = { [query.model]: mData };
+      stats.push({
+        date,
+        count: mData.count || 0,
+        inputChars: mData.inputChars || 0,
+        outputChars: mData.outputChars || 0,
+        quickCount: 0,
+        agentCount: mData.count || 0,
+        deepCount: 0,
+        inputTokens: mData.inputTokens || 0,
+        outputTokens: mData.outputTokens || 0,
+        cachedTokens: mData.cachedTokens || 0,
+        models,
+      });
+    } else {
+      stats.push({ date, ...day, models });
+    }
   }
   stats.sort((a, b) => b.date.localeCompare(a.date));
   return stats;
@@ -456,7 +533,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
 
     case 'GET_USAGE_STATS':
-      getUsageStats().then(stats => sendResponse({ success: true, data: stats }));
+      getUsageStats(message.query || {}).then(stats => sendResponse({ success: true, data: stats }));
       return true;
 
     case 'RESET_USAGE_STATS':
@@ -513,7 +590,7 @@ async function testLLM(settings) {
       apiKey: settings.llmApiKey,
       model: settings.llmModel,
     });
-    const result = await client.chat(
+    const { content: result } = await client.chat(
       [{ role: 'user', content: 'Say "OK" in one word.' }],
       { maxTokens: 10 }
     );

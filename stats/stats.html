@@ -10,44 +10,160 @@
   <div class="stats-container">
     <header class="header">
       <h1>Usage Statistics</h1>
-      <p class="subtitle">API call history and character usage</p>
+      <p class="subtitle">Token usage, call history, and cost tracking</p>
     </header>
 
-    <!-- Summary Cards -->
-    <div class="summary-cards" id="summaryCards">
-      <div class="card">
-        <div class="card-value" id="totalCalls">-</div>
-        <div class="card-label">Total Calls</div>
-      </div>
-      <div class="card">
-        <div class="card-value" id="llmCalls">-</div>
-        <div class="card-label">LLM Calls</div>
-      </div>
-      <div class="card">
-        <div class="card-value" id="totalIn">-</div>
-        <div class="card-label">Input Chars</div>
-      </div>
-      <div class="card">
-        <div class="card-value" id="totalOut">-</div>
-        <div class="card-label">Output Chars</div>
-      </div>
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="today">Today</button>
+      <button class="tab-btn" data-tab="history">History</button>
     </div>
 
-    <!-- Usage Breakdown -->
-    <section class="section">
-      <h2 class="section-title">Usage Breakdown</h2>
-      <div id="dailyTable" class="table-container">
-        <div class="loading-text">Loading...</div>
+    <!-- ── Today Tab ── -->
+    <div class="tab-panel active" id="panel-today">
+      <!-- Today Summary Cards -->
+      <div class="summary-cards">
+        <div class="card card-calls">
+          <div class="card-icon">📞</div>
+          <div class="card-body">
+            <div class="card-value" id="todayCalls">...</div>
+            <div class="card-label">Total Calls</div>
+          </div>
+        </div>
+        <div class="card card-tokens">
+          <div class="card-icon">🎯</div>
+          <div class="card-body">
+            <div class="card-value" id="todayTokens">...</div>
+            <div class="card-label">Total Tokens</div>
+          </div>
+        </div>
+        <div class="card card-in">
+          <div class="card-icon">📥</div>
+          <div class="card-body">
+            <div class="card-value" id="todayInTokens">...</div>
+            <div class="card-label">Input Tokens</div>
+          </div>
+        </div>
+        <div class="card card-out">
+          <div class="card-icon">📤</div>
+          <div class="card-body">
+            <div class="card-value" id="todayOutTokens">...</div>
+            <div class="card-label">Output Tokens</div>
+          </div>
+        </div>
+        <div class="card card-cache">
+          <div class="card-icon">⚡</div>
+          <div class="card-body">
+            <div class="card-value" id="todayCached">...</div>
+            <div class="card-label">Cached Tokens</div>
+          </div>
+        </div>
       </div>
-    </section>
 
-    <!-- LLM Info -->
-    <section class="section">
-      <h2 class="section-title">LLM Configuration Used</h2>
-      <div id="llmInfo" class="llm-info">
-        <div class="loading-text">Loading...</div>
+      <!-- Today Breakdown -->
+      <section class="section">
+        <h2 class="section-title">Today's Breakdown</h2>
+        <div id="todayTable" class="table-container">
+          <div class="loading-text">Loading...</div>
+        </div>
+      </section>
+
+      <!-- Mode Distribution -->
+      <section class="section">
+        <h2 class="section-title">Mode Distribution</h2>
+        <div id="modeChart" class="mode-chart">
+          <div class="loading-text">Loading...</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ── History Tab ── -->
+    <div class="tab-panel" id="panel-history">
+      <!-- History Summary Cards -->
+      <div class="summary-cards">
+        <div class="card card-calls">
+          <div class="card-icon">📞</div>
+          <div class="card-body">
+            <div class="card-value" id="histCalls">...</div>
+            <div class="card-label">Total Calls</div>
+          </div>
+        </div>
+        <div class="card card-tokens">
+          <div class="card-icon">🎯</div>
+          <div class="card-body">
+            <div class="card-value" id="histTokens">...</div>
+            <div class="card-label">Total Tokens</div>
+          </div>
+        </div>
+        <div class="card card-in">
+          <div class="card-icon">📥</div>
+          <div class="card-body">
+            <div class="card-value" id="histInTokens">...</div>
+            <div class="card-label">Input Tokens</div>
+          </div>
+        </div>
+        <div class="card card-out">
+          <div class="card-icon">📤</div>
+          <div class="card-body">
+            <div class="card-value" id="histOutTokens">...</div>
+            <div class="card-label">Output Tokens</div>
+          </div>
+        </div>
+        <div class="card card-cache">
+          <div class="card-icon">⚡</div>
+          <div class="card-body">
+            <div class="card-value" id="histCached">...</div>
+            <div class="card-label">Cached Tokens</div>
+          </div>
+        </div>
       </div>
-    </section>
+
+      <!-- Filters -->
+      <section class="section filter-section">
+        <h2 class="section-title">Filter</h2>
+        <div class="filter-row">
+          <div class="filter-group">
+            <label class="filter-label">Model</label>
+            <select id="filterModel" class="filter-select">
+              <option value="">All Models</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Period</label>
+            <select id="filterPeriod" class="filter-select">
+              <option value="day">Daily</option>
+              <option value="week">Weekly</option>
+              <option value="month">Monthly</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">From</label>
+            <input type="date" id="filterStart" class="filter-input">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">To</label>
+            <input type="date" id="filterEnd" class="filter-input">
+          </div>
+          <button id="applyFilterBtn" class="btn-primary">Apply</button>
+        </div>
+      </section>
+
+      <!-- History Table -->
+      <section class="section">
+        <h2 class="section-title">Usage Breakdown</h2>
+        <div id="historyTable" class="table-container">
+          <div class="loading-text">Loading...</div>
+        </div>
+      </section>
+
+      <!-- LLM Info -->
+      <section class="section">
+        <h2 class="section-title">LLM Configuration Used</h2>
+        <div id="llmInfo" class="llm-info">
+          <div class="loading-text">Loading...</div>
+        </div>
+      </section>
+    </div>
 
     <!-- Actions -->
     <div class="actions">

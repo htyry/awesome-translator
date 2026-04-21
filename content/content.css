@@ -2,16 +2,18 @@
 
 /* ─── Panel (main bubble) ─── */
 .at-panel {
-  position: absolute;
+  position: fixed;
   z-index: 2147483647;
   width: 360px;
-  max-height: 70vh;
+  max-height: 80vh;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.08);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   color: #2c2c2c;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   animation: at-fade-in 0.15s ease-out;
 }
@@ -29,6 +31,12 @@
   padding: 8px 12px;
   background: #fafafa;
   border-bottom: 1px solid #eee;
+  cursor: grab;
+  user-select: none;
+}
+
+.at-panel-header:active {
+  cursor: grabbing;
 }
 
 .at-title {
@@ -126,7 +134,8 @@
 /* ─── Panel Body ─── */
 .at-panel-body {
   padding: 12px 14px;
-  max-height: 400px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -230,7 +239,7 @@ strong {
 
 /* ─── Trigger Button ─── */
 .at-trigger-btn {
-  position: absolute;
+  position: fixed;
   z-index: 2147483646;
   width: 28px;
   height: 28px;

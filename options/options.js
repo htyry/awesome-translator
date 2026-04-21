@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     defaultMode: document.getElementById('defaultMode'),
     intentMode: document.getElementById('intentMode'),
     contextHistoryLimit: document.getElementById('contextHistoryLimit'),
+    keywordUpdateInterval: document.getElementById('keywordUpdateInterval'),
     autoTranslate: document.getElementById('autoTranslate'),
     manualTriggerSection: document.getElementById('manualTriggerSection'),
     showTriggerIcon: document.getElementById('showTriggerIcon'),
@@ -55,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     defaultMode: 'agent',
     intentMode: 'auto',
     contextHistoryLimit: 5,
+    keywordUpdateInterval: 10,
     autoTranslate: true,
     showTriggerIcon: true,
     customShortcut: 'Alt+Shift+T',
@@ -431,6 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.defaultMode.value = result.defaultMode || DEFAULTS.defaultMode;
       elements.intentMode.value = result.intentMode || DEFAULTS.intentMode;
       elements.contextHistoryLimit.value = result.contextHistoryLimit || DEFAULTS.contextHistoryLimit;
+      elements.keywordUpdateInterval.value = result.keywordUpdateInterval || DEFAULTS.keywordUpdateInterval;
       elements.autoTranslate.checked = result.autoTranslate !== undefined ? result.autoTranslate : DEFAULTS.autoTranslate;
       elements.showTriggerIcon.checked = result.showTriggerIcon !== undefined ? result.showTriggerIcon : DEFAULTS.showTriggerIcon;
       const savedShortcut = result.customShortcut || DEFAULTS.customShortcut;
@@ -461,6 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
       defaultMode: elements.defaultMode.value,
       intentMode: elements.intentMode.value,
       contextHistoryLimit: parseInt(elements.contextHistoryLimit.value) || DEFAULTS.contextHistoryLimit,
+      keywordUpdateInterval: parseInt(elements.keywordUpdateInterval.value) || DEFAULTS.keywordUpdateInterval,
       autoTranslate: elements.autoTranslate.checked,
       showTriggerIcon: elements.showTriggerIcon.checked,
       customShortcut: elements.customShortcut || DEFAULTS.customShortcut,
