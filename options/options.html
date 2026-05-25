@@ -259,9 +259,51 @@
       <div class="option-item column-item">
         <label for="userProfile">
           Profile description
-          <span class="desc">Briefly describe your profession/domain/interests. This helps the agent adapt translations (e.g. "前端开发者，经常阅读技术文档")</span>
+          <span class="desc">Briefly describe your profession/domain/interests. This helps the agent adapt translations and explanations (e.g. "前端开发者，经常阅读技术文档")</span>
         </label>
         <textarea id="userProfile" rows="3" placeholder="e.g. 前端开发者，经常阅读技术文档和英文论文..."></textarea>
+      </div>
+    </section>
+
+    <!-- Explain Mode -->
+    <section class="section">
+      <h2 class="section-title">Explain Mode</h2>
+      <p class="section-note">Teaching-style explanation powered by LLM. Select text and click "Explain" to get contextual analysis.</p>
+
+      <div class="option-item toggle-item">
+        <label for="explainEnabled">
+          Enable Explain feature
+          <span class="desc">Show "Explain" button in the floating toolbar when text is selected</span>
+        </label>
+        <input type="checkbox" id="explainEnabled" checked>
+      </div>
+
+      <div id="explainSubSettings">
+        <div class="option-item">
+          <label for="explainEndpointId">
+            Explain API Endpoint
+            <span class="desc">Choose which LLM endpoint to use for explanations. Uses the default translation endpoint if not specified.</span>
+          </label>
+          <select id="explainEndpointId">
+            <option value="">Use default endpoint</option>
+          </select>
+        </div>
+
+        <div class="option-item toggle-item">
+          <label for="explainThinkingMode">
+            Show thinking process
+            <span class="desc">Display the model's reasoning process (requires a thinking-capable model like DeepSeek-R1)</span>
+          </label>
+          <input type="checkbox" id="explainThinkingMode">
+        </div>
+
+        <div class="option-item column-item">
+          <label for="customPromptExplain">
+            Custom Explain Prompt
+            <span class="desc">Override the default explanation system prompt. Leave empty to use the built-in prompt.</span>
+          </label>
+          <textarea id="customPromptExplain" rows="4" placeholder="Leave empty to use default prompt..."></textarea>
+        </div>
       </div>
     </section>
 

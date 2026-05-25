@@ -37,6 +37,12 @@ document.addEventListener('DOMContentLoaded', () => {
     epTestResult: document.getElementById('epTestResult'),
     // Other
     userProfile: document.getElementById('userProfile'),
+    // Explain mode
+    explainEnabled: document.getElementById('explainEnabled'),
+    explainSubSettings: document.getElementById('explainSubSettings'),
+    explainEndpointId: document.getElementById('explainEndpointId'),
+    explainThinkingMode: document.getElementById('explainThinkingMode'),
+    customPromptExplain: document.getElementById('customPromptExplain'),
     customPromptAgentMeaning: document.getElementById('customPromptAgentMeaning'),
     customPromptAgentGrammar: document.getElementById('customPromptAgentGrammar'),
     customPromptDeep: document.getElementById('customPromptDeep'),
@@ -66,6 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
     bubblePosition: 'below',
     showCopyButton: true,
     userProfile: '',
+    explainEnabled: true,
+    explainEndpointId: '',
+    explainThinkingMode: false,
     ttsRate: 1,
     ttsVoice: '',
   };
@@ -73,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   loadVoices();
   loadEndpoints();
+  loadExplainEndpoints();
 
   elements.openStatsBtn.addEventListener('click', () => {
     window.open(chrome.runtime.getURL('stats/stats.html'), '_blank');
@@ -82,9 +92,13 @@ document.addEventListener('DOMContentLoaded', () => {
   elements.saveBtn.addEventListener('click', saveSettings);
   elements.resetBtn.addEventListener('click', resetToDefaults);
 
-  elements.autoTranslate.addEventListener('change', () => {
-    elements.manualTriggerSection.style.display = elements.autoTranslate.checked ? 'none' : 'block';
-  });
+    elements.autoTranslate.addEventListener('change', () => {
+      elements.manualTriggerSection.style.display = elements.autoTranslate.checked ? 'none' : 'block';
+    });
+
+    elements.explainEnabled.addEventListener('change', () => {
+      elements.explainSubSettings.style.display = elements.explainEnabled.checked ? 'block' : 'none';
+    });
 
   elements.toggleEpKeyBtn.addEventListener('click', () => {
     const input = elements.epApiKey;
@@ -118,7 +132,8 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.customPromptAgentMeaning.value = '';
     elements.customPromptAgentGrammar.value = '';
     elements.customPromptDeep.value = '';
-    chrome.storage.local.remove(['customPrompt_agent_meaning', 'customPrompt_agent_grammar', 'customPrompt_deep']);
+    elements.customPromptExplain.value = '';
+    chrome.storage.local.remove(['customPrompt_agent_meaning', 'customPrompt_agent_grammar', 'customPrompt_deep', 'customPrompt_explain']);
     showStatus('Prompts reset to defaults', 'success');
   });
 
@@ -246,6 +261,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // ─── Explain Endpoint Selector ───
+  async function loadExplainEndpoints() {
+    const result = await chrome.storage.local.get(['llmEndpoints', 'explainEndpointId']);
+    const endpoints = result.llmEndpoints || [];
+    const selectedId = result.explainEndpointId || '';
+
+    const select = elements.explainEndpointId;
+    select.innerHTML = '<option value="">Use default endpoint</option>';
+    endpoints.forEach(ep => {
+      const opt = document.createElement('option');
+      opt.value = ep.id;
+      opt.textContent = ep.name;
+      if (ep.id === selectedId) opt.selected = true;
+      select.appendChild(opt);
+    });
+  }
+
   async function renderEndpointList(filter) {
     const result = await chrome.storage.local.get(['llmEndpoints', 'activeEndpointId']);
     const endpoints = result.llmEndpoints || [];
@@ -358,6 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     await chrome.storage.local.set({ llmEndpoints: endpoints, activeEndpointId: editingEndpointId });
     await loadEndpoints();
+    await loadExplainEndpoints();
     // Notify background
     chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: editingEndpointId }, () => {
       void chrome.runtime.lastError;
@@ -379,6 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
     editingEndpointId = null;
     elements.endpointEditor.classList.add('hidden');
     await loadEndpoints();
+    await loadExplainEndpoints();
     chrome.runtime.sendMessage({ type: 'SET_ACTIVE_ENDPOINT', endpointId: newActive }, () => {
       void chrome.runtime.lastError;
     });
@@ -445,6 +479,11 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.bubblePosition.value = result.bubblePosition || DEFAULTS.bubblePosition;
       elements.showCopyButton.checked = result.showCopyButton !== undefined ? result.showCopyButton : DEFAULTS.showCopyButton;
       elements.userProfile.value = result.userProfile || DEFAULTS.userProfile;
+      elements.explainEnabled.checked = result.explainEnabled !== undefined ? result.explainEnabled : DEFAULTS.explainEnabled;
+      elements.explainThinkingMode.checked = result.explainThinkingMode !== undefined ? result.explainThinkingMode : DEFAULTS.explainThinkingMode;
+      elements.customPromptExplain.value = result.customPrompt_explain || '';
+      // Toggle explain sub-settings visibility
+      elements.explainSubSettings.style.display = elements.explainEnabled.checked ? 'block' : 'none';
       elements.customPromptAgentMeaning.value = result.customPrompt_agent_meaning || '';
       elements.customPromptAgentGrammar.value = result.customPrompt_agent_grammar || '';
       elements.customPromptDeep.value = result.customPrompt_deep || '';
@@ -474,6 +513,10 @@ document.addEventListener('DOMContentLoaded', () => {
       bubblePosition: elements.bubblePosition.value,
       showCopyButton: elements.showCopyButton.checked,
       userProfile: elements.userProfile.value.trim(),
+      explainEnabled: elements.explainEnabled.checked,
+      explainEndpointId: elements.explainEndpointId.value,
+      explainThinkingMode: elements.explainThinkingMode.checked,
+      customPrompt_explain: elements.customPromptExplain.value.trim(),
       customPrompt_agent_meaning: elements.customPromptAgentMeaning.value.trim(),
       customPrompt_agent_grammar: elements.customPromptAgentGrammar.value.trim(),
       customPrompt_deep: elements.customPromptDeep.value.trim(),
