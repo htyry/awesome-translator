@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const translateBtn = document.getElementById('translateBtn');
   const copyBtn = document.getElementById('copyBtn');
   const resultBox = document.getElementById('result');
+  const requestMeta = document.getElementById('requestMeta');
   const settingsBtn = document.getElementById('settingsBtn');
   const intentRow = document.getElementById('intentRow');
   const intentBadge = document.getElementById('intentBadge');
@@ -142,6 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
             copyBtn.style.display = 'inline-flex';
             modeResults[currentMode] = resultBox.innerHTML;
             if (msg.keywords) updateKeywordsDisplay(msg.keywords);
+            showRequestMeta(msg.meta, true);
             disconnectPort();
             break;
 
@@ -149,7 +151,14 @@ document.addEventListener('DOMContentLoaded', () => {
             isTranslating = false;
             setLoading(false);
             showError(msg.error || 'Translation failed');
+            showRequestMeta(msg.meta, false);
             disconnectPort();
+            break;
+
+          case 'retry':
+            // Show retry status in result area
+            resultBox.classList.remove('streaming');
+            resultBox.textContent = `Retrying (${msg.attempt})...`;
             break;
         }
       });
@@ -172,6 +181,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function disconnectPort() {
     if (port) { try { port.disconnect(); } catch {} port = null; }
+  }
+
+  // ─── Request Meta Display ───
+  function showRequestMeta(meta, success) {
+    if (!meta) {
+      requestMeta.classList.add('hidden');
+      return;
+    }
+    const parts = [];
+    // Model
+    if (meta.model) {
+      parts.push(`<span class="meta-item meta-model" title="${meta.endpoint || ''}">${meta.model}</span>`);
+    }
+    // Latency
+    if (meta.latency != null) {
+      const latencyClass = meta.latency < 2000 ? 'meta-fast' : meta.latency < 5000 ? 'meta-normal' : 'meta-slow';
+      parts.push(`<span class="meta-item ${latencyClass}">${(meta.latency / 1000).toFixed(1)}s</span>`);
+    }
+    // Retries
+    if (meta.retries > 0) {
+      parts.push(`<span class="meta-item meta-retry">${meta.retries} retry${meta.retries > 1 ? 's' : ''}</span>`);
+    }
+    // Tokens
+    if (meta.tokens) {
+      const t = meta.tokens;
+      let tokenStr = `${t.input + t.output} tokens`;
+      if (t.cached > 0) tokenStr += ` (${t.cached} cached)`;
+      parts.push(`<span class="meta-item meta-tokens">${tokenStr}</span>`);
+    }
+    // Status
+    parts.push(`<span class="meta-item ${success ? 'meta-success' : 'meta-fail'}">${success ? 'OK' : 'FAIL'}</span>`);
+
+    requestMeta.innerHTML = parts.join('<span class="meta-sep">·</span>');
+    requestMeta.classList.remove('hidden');
   }
 
   // ─── Copy ───

@@ -216,6 +216,12 @@ body {
   font-size: 12.5px;
 }
 
+.retrying-text {
+  color: #e6a817 !important;
+  font-size: 12.5px;
+  font-style: italic;
+}
+
 .output-actions {
   display: flex;
   justify-content: flex-end;
@@ -388,6 +394,60 @@ body {
 
 .keywords-refresh:hover {
   color: #555;
+}
+
+/* ─── Request Meta ─── */
+.request-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  font-size: 10.5px;
+  color: #999;
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+
+.request-meta.hidden {
+  display: none !important;
+}
+
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.meta-model {
+  color: #666;
+  font-weight: 500;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-fast { color: #2e7d32; }
+.meta-normal { color: #e65100; }
+.meta-slow { color: #c62828; }
+
+.meta-retry { color: #e6a817; }
+
+.meta-tokens { color: #888; }
+
+.meta-success {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.meta-fail {
+  color: #c62828;
+  font-weight: 500;
+}
+
+.meta-sep {
+  color: #ccc;
+  font-size: 10px;
 }
 
 /* ─── Utility ─── */

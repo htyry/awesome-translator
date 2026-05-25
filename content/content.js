@@ -1,5 +1,6 @@
 // content.js — Injected into web pages
 // In-page translation panel with mode switching, intent detection, streaming, TTS
+// Plus Explain mode with conversation history and thinking display
 
 (function () {
   'use strict';
@@ -18,16 +19,24 @@
 
   // ═══ State ═══
   let panel = null;
-  let triggerBtn = null;
+  let toolbar = null;
   let port = null;
+  let explainPort = null;
   let currentMode = MODES.AGENT;
   let currentIntent = null;
   let detectedIntent = null;
   let currentText = '';
   let isTranslating = false;
   let customShortcut = 'Alt+Shift+T';
-  let _isFromBtn = false;
+  let _isFromToolbar = false;
   let modeResults = {};  // cache: { mode: formattedHtml }
+
+  // Explain state
+  let explainPanel = null;
+  let explainConversation = []; // { role, content } pairs
+  let explainThinking = '';
+  let isExplaining = false;
+
   let settings = {
     autoTranslate: true,
     showTriggerIcon: true,
@@ -39,6 +48,8 @@
     intentMode: 'auto',
     targetLang: 'zh',
     hasLLM: false,
+    explainEnabled: true,
+    explainThinkingMode: false,
   };
 
   // ─── Init ───
@@ -51,6 +62,8 @@
       'minSelectionLength', 'maxSelectionLength',
       'showCopyButton', 'bubblePosition', 'customShortcut',
       'defaultMode', 'intentMode', 'targetLang',
+      'explainEnabled', 'explainThinkingMode',
+      'llmEndpoints',
     ], r => {
       Object.assign(settings, {
         autoTranslate:       r.autoTranslate ?? true,
@@ -63,23 +76,22 @@
         defaultMode:         r.defaultMode || 'agent',
         intentMode:          r.intentMode || 'auto',
         targetLang:          r.targetLang || 'zh',
+        explainEnabled:      r.explainEnabled ?? true,
+        explainThinkingMode: r.explainThinkingMode ?? false,
       });
-      // Check if any LLM endpoint is configured
-      chrome.storage.local.get('llmEndpoints', r2 => {
-        const endpoints = r2.llmEndpoints || [];
-        settings.hasLLM = endpoints.some(e => e.apiKey);
-        if (!settings.hasLLM && settings.defaultMode !== 'quick') {
-          currentMode = MODES.QUICK;
-        } else {
-          currentMode = MODES[settings.defaultMode.toUpperCase()] || MODES.AGENT;
-        }
-      });
+      // Check if any LLM endpoint is configured (same get call, no nesting)
+      const endpoints = r.llmEndpoints || [];
+      settings.hasLLM = endpoints.some(e => e.apiKey);
+      if (!settings.hasLLM && settings.defaultMode !== 'quick') {
+        currentMode = MODES.QUICK;
+      } else {
+        currentMode = MODES[settings.defaultMode.toUpperCase()] || MODES.AGENT;
+      }
     });
   }
 
   function ensureVoices() {
     if (!('speechSynthesis' in window)) return;
-    // Force initial voice loading (first call often returns empty)
     speechSynthesis.getVoices();
     if (speechSynthesis.onvoiceschanged !== undefined) {
       speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
@@ -128,20 +140,26 @@
 
   // ─── Selection handler ───
   document.addEventListener('mouseup', e => {
-    // Ignore clicks inside panel/trigger — don't let selection-clear hide them
-    if (panel?.contains(e.target) || triggerBtn?.contains(e.target)) return;
+    // Ignore clicks inside panel/toolbar/explainPanel
+    if (panel?.contains(e.target) || toolbar?.contains(e.target) || explainPanel?.contains(e.target)) return;
     const cx = e.clientX, cy = e.clientY;
     setTimeout(() => {
-      if (_isFromBtn) { _isFromBtn = false; return; }
+      if (_isFromToolbar) { _isFromToolbar = false; return; }
       const sel = window.getSelection().toString().trim();
       if (sel.length < settings.minSelectionLength || sel.length > settings.maxSelectionLength) {
-        hideTriggerBtn(); hidePanel(); return;
+        hideToolbar(); hidePanel(); hideExplainPanel(); return;
       }
-      if (settings.autoTranslate) {
+      // If explain is enabled, always show floating toolbar (Translate + optional Explain)
+      // hasLLM only controls whether the Explain button appears, not the toolbar itself
+      if (settings.explainEnabled) {
+        hidePanel();
+        hideExplainPanel();
+        showToolbar(sel, cx, cy);
+      } else if (settings.autoTranslate) {
         showPanel(sel, cx, cy);
       } else if (settings.showTriggerIcon) {
         hidePanel();
-        showTriggerBtn(sel, cx, cy);
+        showToolbar(sel, cx, cy);
       } else {
         hideAll();
       }
@@ -149,8 +167,8 @@
   });
 
   document.addEventListener('mousedown', e => {
-    if (panel?.contains(e.target) || triggerBtn?.contains(e.target)) return;
-    hidePanel(); hideTriggerBtn();
+    if (panel?.contains(e.target) || toolbar?.contains(e.target) || explainPanel?.contains(e.target)) return;
+    hidePanel(); hideToolbar(); hideExplainPanel();
   });
 
   // ─── Keyboard ───
@@ -174,29 +192,55 @@
   }
 
   // ════════════════════════════════════════
-  //  Trigger Button
+  //  Floating Toolbar (Translate + Explain)
   // ════════════════════════════════════════
-  function showTriggerBtn(text, x, y) {
-    hideTriggerBtn();
-    triggerBtn = document.createElement('div');
-    triggerBtn.className = 'at-trigger-btn';
-    triggerBtn.textContent = 'T';
-    triggerBtn.title = 'Click to translate';
+  function showToolbar(text, x, y) {
+    hideToolbar();
+    toolbar = document.createElement('div');
+    toolbar.className = 'at-floating-toolbar';
 
+    // Translate icon button
+    const translateBtn = document.createElement('button');
+    translateBtn.className = 'at-toolbar-btn at-toolbar-translate';
+    translateBtn.title = 'Translate';
+    translateBtn.innerHTML = '<span class="at-toolbar-icon">T</span><span class="at-toolbar-label">Translate</span>';
+    translateBtn.addEventListener('mousedown', e => {
+      e.stopPropagation(); e.preventDefault();
+      _isFromToolbar = true;
+      hideToolbar();
+      doTranslate(text, x, y);
+    });
+
+    toolbar.appendChild(translateBtn);
+
+    // Explain icon button (only if LLM is available)
+    if (settings.hasLLM) {
+      const explainBtn = document.createElement('button');
+      explainBtn.className = 'at-toolbar-btn at-toolbar-explain';
+      explainBtn.title = 'Explain';
+      explainBtn.innerHTML = '<span class="at-toolbar-icon">E</span><span class="at-toolbar-label">Explain</span>';
+      explainBtn.addEventListener('mousedown', e => {
+        e.stopPropagation(); e.preventDefault();
+        _isFromToolbar = true;
+        hideToolbar();
+        doExplain(text, x, y);
+      });
+      toolbar.appendChild(explainBtn);
+    }
+
+    // Position near selection
     let px = x + 8, py = y + 8;
-    if (px + 32 > window.innerWidth - 5) px = window.innerWidth - 37;
-    if (py + 32 > window.innerHeight - 5) py = y - 40;
-    triggerBtn.style.left = px + 'px';
-    triggerBtn.style.top = py + 'px';
-    document.body.appendChild(triggerBtn);
+    const tbWidth = settings.hasLLM ? 160 : 100;
+    if (px + tbWidth > window.innerWidth - 5) px = window.innerWidth - tbWidth - 10;
+    if (py + 36 > window.innerHeight - 5) py = y - 44;
+    toolbar.style.left = px + 'px';
+    toolbar.style.top = py + 'px';
 
-    const h = e => { e.stopPropagation(); e.preventDefault(); _isFromBtn = true; hideTriggerBtn(); doTranslate(text, px, py); };
-    triggerBtn.addEventListener('mousedown', h);
-    triggerBtn.addEventListener('click', h);
+    document.body.appendChild(toolbar);
   }
 
-  function hideTriggerBtn() {
-    if (triggerBtn) { triggerBtn.remove(); triggerBtn = null; }
+  function hideToolbar() {
+    if (toolbar) { toolbar.remove(); toolbar = null; }
   }
 
   // ════════════════════════════════════════
@@ -215,6 +259,7 @@
 
   function showPanel(text, x, y) {
     hidePanel();
+    hideExplainPanel();
     currentText = text;
     currentIntent = null;
     detectedIntent = null;
@@ -258,6 +303,7 @@
       </div>
       <div class="at-panel-body">
         <div class="at-result"></div>
+        <div class="at-request-meta at-hidden"></div>
       </div>
       <div class="at-panel-actions">
         ${settings.showCopyButton ? '<button class="at-action-btn at-copy-btn" title="Copy">Copy</button>' : ''}
@@ -314,7 +360,6 @@
       bar.querySelector('#atKwRefresh')?.addEventListener('click', forceRefreshKeywords);
       return;
     }
-    // Keywords may be { original, translated } objects or legacy strings
     const tagsHtml = keywords.map((kw, i) => {
       const label = typeof kw === 'string' ? kw : (kw.translated || kw.original);
       const original = typeof kw === 'string' ? kw : kw.original;
@@ -332,7 +377,6 @@
     chrome.runtime.sendMessage({ type: 'PROMOTE_KEYWORD', keyword }, resp => {
       if (resp?.success && resp.data?.keywords) {
         updateKeywordsDisplay(resp.data.keywords);
-        // Re-translate with updated keyword order (clear cached result for current mode)
         if (currentText && !isTranslating) {
           modeResults[currentMode] = null;
           requestTranslation();
@@ -348,7 +392,6 @@
     chrome.runtime.sendMessage({ type: 'FORCE_UPDATE_KEYWORDS' }, resp => {
       if (resp?.success && resp.data?.keywords) {
         updateKeywordsDisplay(resp.data.keywords);
-        // Re-translate with updated keywords
         if (currentText && !isTranslating) {
           modeResults[currentMode] = null;
           requestTranslation();
@@ -369,7 +412,6 @@
 
     const resultEl = panel.querySelector('.at-result');
 
-    // Show cached result if available
     if (modeResults[mode]) {
       resultEl.innerHTML = modeResults[mode];
       resultEl.className = 'at-result';
@@ -386,7 +428,6 @@
       if (badge) badge.classList.add('at-hidden');
     }
 
-    // Reset manual intent selection
     if (settings.intentMode === 'manual') {
       panel.querySelectorAll('.at-intent-tag').forEach(t =>
         t.classList.toggle('at-active', t.dataset.intent === 'meaning')
@@ -415,7 +456,6 @@
     resultEl.innerHTML = '<span class="at-loading">Translating…</span>';
 
     if (currentMode === MODES.QUICK) {
-      // Non-streaming via sendMessage
       chrome.runtime.sendMessage({
         type: 'GET_TRANSLATION',
         text: currentText,
@@ -431,7 +471,6 @@
         }
       });
     } else {
-      // Streaming via port
       port = chrome.runtime.connect({ name: 'translation' });
       let full = '';
 
@@ -472,12 +511,19 @@
             resultEl.className = 'at-result';
             modeResults[currentMode] = resultEl.innerHTML;
             if (msg.keywords) updateKeywordsDisplay(msg.keywords);
+            showRequestMeta(panel, msg.meta, true);
             break;
 
           case 'error':
             isTranslating = false;
             resultEl.innerHTML = `<span class="at-error">${escapeHtml(msg.error)}</span>`;
             resultEl.className = 'at-result';
+            showRequestMeta(panel, msg.meta, false);
+            break;
+
+          case 'retry':
+            resultEl.innerHTML = `<span class="at-retrying">Retrying (${msg.attempt})...</span>`;
+            resultEl.className = 'at-result at-retrying-state';
             break;
         }
       });
@@ -496,6 +542,244 @@
 
   function disconnectPort() {
     if (port) { try { port.disconnect(); } catch {} port = null; }
+  }
+
+  // ════════════════════════════════════════
+  //  Explain Panel
+  // ════════════════════════════════════════
+  function doExplain(text, x, y) {
+    if (!x || !y) {
+      try {
+        const r = window.getSelection().getRangeAt(0).getBoundingClientRect();
+        x = r.left + r.width / 2;
+        y = r.bottom + 5;
+      } catch { x = 200; y = 200; }
+    }
+    showExplainPanel(text, x, y);
+  }
+
+  function showExplainPanel(text, x, y) {
+    hidePanel();
+    hideExplainPanel();
+    currentText = text;
+    explainConversation = [];
+    explainThinking = '';
+    isExplaining = false;
+
+    // Clear previous explain history on background side to avoid cross-text contamination
+    chrome.runtime.sendMessage({ type: 'CLEAR_EXPLAIN_HISTORY' }, () => {
+      void chrome.runtime.lastError;
+    });
+
+    explainPanel = document.createElement('div');
+    explainPanel.className = 'at-panel at-explain-panel';
+
+    // Build panel HTML
+    explainPanel.innerHTML = `
+      <div class="at-panel-header">
+        <span class="at-title">Explain</span>
+        <div class="at-explain-header-actions">
+          <button class="at-action-btn at-explain-clear-btn" title="Clear conversation">Clear</button>
+          <button class="at-close-btn">&times;</button>
+        </div>
+      </div>
+      <div class="at-explain-source" id="atExplainSource">
+        <div class="at-explain-source-toggle" id="atSourceToggle">
+          <span class="at-explain-source-arrow">&#9660;</span>
+          <span class="at-explain-source-label">Selected Text</span>
+        </div>
+        <div class="at-explain-source-text" id="atSourceText">${escapeHtml(text)}</div>
+      </div>
+      <div class="at-explain-body" id="atExplainBody">
+        <div class="at-explain-messages" id="atExplainMessages"></div>
+      </div>
+      <div class="at-explain-input-area">
+        <div class="at-explain-input-row">
+          <input type="text" class="at-explain-input" id="atExplainInput" placeholder="Type your question, or press Enter for default explanation..." />
+          <button class="at-explain-send-btn" id="atExplainSendBtn" title="Send">&#10148;</button>
+        </div>
+      </div>
+    `;
+
+    const pos = calcPos(x, y, null);
+    explainPanel.style.left = pos.x + 'px';
+    explainPanel.style.top = pos.y + 'px';
+    document.body.appendChild(explainPanel);
+
+    const pos2 = calcPos(x, y, explainPanel);
+    if (pos2.y !== pos.y) explainPanel.style.top = pos2.y + 'px';
+
+    // Bind events
+    explainPanel.querySelector('.at-close-btn').addEventListener('click', hideExplainPanel);
+    explainPanel.querySelector('.at-explain-clear-btn').addEventListener('click', clearExplainConversation);
+
+    // Source text toggle
+    const sourceToggle = explainPanel.querySelector('#atSourceToggle');
+    sourceToggle.addEventListener('click', () => {
+      const sourceText = explainPanel.querySelector('#atSourceText');
+      const arrow = sourceToggle.querySelector('.at-explain-source-arrow');
+      const isCollapsed = sourceText.classList.toggle('at-explain-collapsed');
+      arrow.innerHTML = isCollapsed ? '&#9654;' : '&#9660;';
+    });
+
+    // Input handling
+    const inputEl = explainPanel.querySelector('#atExplainInput');
+    const sendBtn = explainPanel.querySelector('#atExplainSendBtn');
+    sendBtn.addEventListener('click', () => sendExplainQuestion(inputEl));
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendExplainQuestion(inputEl);
+      }
+    });
+
+    // Drag via header
+    enableDrag(explainPanel, explainPanel.querySelector('.at-panel-header'));
+
+    // Focus input — user can type question or press Enter for default
+    setTimeout(() => inputEl.focus(), 50);
+  }
+
+  function hideExplainPanel() {
+    disconnectExplainPort();
+    if (explainPanel) { explainPanel.remove(); explainPanel = null; }
+    isExplaining = false;
+  }
+
+  function clearExplainConversation() {
+    explainConversation = [];
+    explainThinking = '';
+    const messagesEl = explainPanel?.querySelector('#atExplainMessages');
+    if (messagesEl) messagesEl.innerHTML = '';
+    // Also clear on background side
+    chrome.runtime.sendMessage({ type: 'CLEAR_EXPLAIN_HISTORY' }, () => {
+      void chrome.runtime.lastError;
+    });
+    // Re-send initial request
+    if (currentText) requestExplanation('');
+  }
+
+  function sendExplainQuestion(inputEl) {
+    if (isExplaining) return;
+    const question = inputEl.value.trim();
+    inputEl.value = '';
+    // Allow empty question → triggers default explanation
+    requestExplanation(question);
+  }
+
+  function requestExplanation(question) {
+    const messagesEl = explainPanel?.querySelector('#atExplainMessages');
+    if (!messagesEl) return;
+
+    disconnectExplainPort();
+    isExplaining = true;
+    explainThinking = '';
+
+    // Add user message bubble (only for follow-up questions)
+    if (question) {
+      const userBubble = document.createElement('div');
+      userBubble.className = 'at-explain-msg at-explain-msg-user';
+      userBubble.innerHTML = `<div class="at-explain-msg-content">${escapeHtml(question)}</div>`;
+      messagesEl.appendChild(userBubble);
+    }
+
+    // Add assistant response placeholder
+    const assistantBubble = document.createElement('div');
+    assistantBubble.className = 'at-explain-msg at-explain-msg-assistant';
+    assistantBubble.innerHTML = '<div class="at-explain-msg-content"><span class="at-loading">Thinking…</span></div>';
+    messagesEl.appendChild(assistantBubble);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    const resultEl = assistantBubble.querySelector('.at-explain-msg-content');
+    const thinkingEl = document.createElement('div');
+    thinkingEl.className = 'at-explain-thinking at-hidden';
+    thinkingEl.innerHTML = '<div class="at-explain-thinking-header" id="atThinkingToggle"><span class="at-explain-thinking-arrow">&#9654;</span> Thinking Process</div><div class="at-explain-thinking-body at-explain-collapsed" id="atThinkingBody"></div>';
+    assistantBubble.insertBefore(thinkingEl, resultEl);
+
+    // Thinking toggle
+    const thinkingToggle = thinkingEl.querySelector('#atThinkingToggle');
+    thinkingToggle.addEventListener('click', () => {
+      const body = thinkingEl.querySelector('#atThinkingBody');
+      const arrow = thinkingToggle.querySelector('.at-explain-thinking-arrow');
+      const isCollapsed = body.classList.toggle('at-explain-collapsed');
+      arrow.innerHTML = isCollapsed ? '&#9654;' : '&#9660;';
+    });
+
+    const thinkingBody = thinkingEl.querySelector('#atThinkingBody');
+
+    // Connect to background for streaming
+    explainPort = chrome.runtime.connect({ name: 'explanation' });
+    let full = '';
+    let thinking = '';
+
+    explainPort.onMessage.addListener(msg => {
+      if (!assistantBubble.isConnected) { disconnectExplainPort(); return; }
+
+      switch (msg.type) {
+        case 'thinking':
+          thinking += msg.content;
+          thinkingBody.textContent = thinking;
+          thinkingEl.classList.remove('at-hidden');
+          // Auto-expand thinking on first chunk
+          if (thinking.length < 50) {
+            thinkingBody.classList.remove('at-explain-collapsed');
+            const arrow = thinkingToggle.querySelector('.at-explain-thinking-arrow');
+            if (arrow) arrow.innerHTML = '&#9660;';
+          }
+          break;
+
+        case 'chunk':
+          if (resultEl.querySelector('.at-loading')) resultEl.innerHTML = '';
+          full += msg.content;
+          resultEl.innerHTML = formatContent(full);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+          break;
+
+        case 'done':
+          isExplaining = false;
+          resultEl.innerHTML = formatContent(msg.content || full);
+          if (msg.thinking) {
+            thinking = msg.thinking;
+            thinkingBody.textContent = thinking;
+            thinkingEl.classList.remove('at-hidden');
+          }
+          // Show request meta
+          appendExplainMeta(assistantBubble, msg.meta, true);
+          // Update conversation
+          explainConversation.push({ role: 'user', content: question || 'Explain this text' });
+          explainConversation.push({ role: 'assistant', content: msg.content || full });
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+          // After first explanation, switch placeholder to follow-up mode
+          const inp = explainPanel?.querySelector('#atExplainInput');
+          if (inp && explainConversation.length >= 2) {
+            inp.placeholder = 'Ask a follow-up question...';
+          }
+          break;
+
+        case 'error':
+          isExplaining = false;
+          resultEl.innerHTML = `<span class="at-error">${escapeHtml(msg.error)}</span>`;
+          appendExplainMeta(assistantBubble, msg.meta, false);
+          break;
+
+        case 'retry':
+          resultEl.innerHTML = `<span class="at-retrying">Retrying (${msg.attempt})...</span>`;
+          break;
+      }
+    });
+
+    explainPort.onDisconnect.addListener(() => { isExplaining = false; explainPort = null; });
+
+    explainPort.postMessage({
+      action: 'explain',
+      text: currentText,
+      question: question,
+      targetLang: settings.targetLang,
+    });
+  }
+
+  function disconnectExplainPort() {
+    if (explainPort) { try { explainPort.disconnect(); } catch {} explainPort = null; }
   }
 
   // ─── Format content (markdown + Terms section) ───
@@ -558,7 +842,6 @@
     utt.lang = 'en-US';
     utt.rate = 1;
 
-    // Prefer Google English voice
     const voices = speechSynthesis.getVoices();
     const google = voices.find(v => v.lang.startsWith('en') && /google/i.test(v.name));
     if (google) utt.voice = google;
@@ -596,13 +879,13 @@
   // ════════════════════════════════════════
   //  Helpers
   // ════════════════════════════════════════
-  function hideAll() { hidePanel(); hideTriggerBtn(); }
+  function hideAll() { hidePanel(); hideToolbar(); hideExplainPanel(); }
 
   // ─── Drag ───
   function enableDrag(el, handle) {
     let startX, startY, origLeft, origTop;
     handle.addEventListener('mousedown', e => {
-      if (e.target.closest('.at-close-btn')) return;
+      if (e.target.closest('.at-close-btn') || e.target.closest('.at-explain-clear-btn')) return;
       e.preventDefault();
       startX = e.clientX;
       startY = e.clientY;
@@ -622,15 +905,14 @@
   }
 
   function calcPos(clientX, clientY, panelEl) {
-    const pw = 380;
+    const pw = panelEl?.classList.contains('at-explain-panel') ? 520 : 380;
     const vh = window.innerHeight;
     const vw = window.innerWidth;
     let px = Math.max(5, Math.min(clientX - pw / 2, vw - pw - 10));
     let py = clientY + 15;
 
-    // Use actual panel height or estimate
     const ph = panelEl ? panelEl.offsetHeight : 300;
-    const maxH = Math.round(vh * 0.8);
+    const maxH = panelEl?.classList.contains('at-explain-panel') ? Math.round(vh * 0.85) : Math.round(vh * 0.8);
 
     if (settings.bubblePosition === 'above' || (py + Math.min(ph, maxH) > vh)) {
       py = Math.max(5, clientY - Math.min(ph, maxH) - 10);
@@ -642,5 +924,51 @@
     const d = document.createElement('div');
     d.textContent = text;
     return d.innerHTML;
+  }
+
+  // ─── Request Meta Display ───
+  function buildMetaHtml(meta, success) {
+    if (!meta) return '';
+    const parts = [];
+    if (meta.model) {
+      parts.push(`<span class="at-meta-item at-meta-model" title="${escapeHtml(meta.endpoint || '')}">${escapeHtml(meta.model)}</span>`);
+    }
+    if (meta.latency != null) {
+      const cls = meta.latency < 2000 ? 'at-meta-fast' : meta.latency < 5000 ? 'at-meta-normal' : 'at-meta-slow';
+      parts.push(`<span class="at-meta-item ${cls}">${(meta.latency / 1000).toFixed(1)}s</span>`);
+    }
+    if (meta.retries > 0) {
+      parts.push(`<span class="at-meta-item at-meta-retry">${meta.retries} retry${meta.retries > 1 ? 's' : ''}</span>`);
+    }
+    if (meta.tokens) {
+      const t = meta.tokens;
+      let tokenStr = `${t.input + t.output} tokens`;
+      if (t.cached > 0) tokenStr += ` (${t.cached} cached)`;
+      parts.push(`<span class="at-meta-item at-meta-tokens">${tokenStr}</span>`);
+    }
+    parts.push(`<span class="at-meta-item ${success ? 'at-meta-success' : 'at-meta-fail'}">${success ? 'OK' : 'FAIL'}</span>`);
+    return parts.join('<span class="at-meta-sep">·</span>');
+  }
+
+  function showRequestMeta(panelEl, meta, success) {
+    const metaEl = panelEl?.querySelector('.at-request-meta');
+    if (!metaEl) return;
+    if (!meta) {
+      metaEl.classList.add('at-hidden');
+      return;
+    }
+    metaEl.innerHTML = buildMetaHtml(meta, success);
+    metaEl.classList.remove('at-hidden');
+  }
+
+  function appendExplainMeta(bubbleEl, meta, success) {
+    if (!meta) return;
+    // Remove previous meta if any
+    const prev = bubbleEl.querySelector('.at-request-meta');
+    if (prev) prev.remove();
+    const metaEl = document.createElement('div');
+    metaEl.className = 'at-request-meta';
+    metaEl.innerHTML = buildMetaHtml(meta, success);
+    bubbleEl.appendChild(metaEl);
   }
 })();
