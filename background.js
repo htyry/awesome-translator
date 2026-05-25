@@ -5,16 +5,18 @@ import { LLMClient } from './lib/llm-client.js';
 import { freeTranslate } from './lib/free-translate.js';
 import { classifyIntent } from './lib/intent-classifier.js';
 import { ContextManager } from './lib/context-manager.js';
-import { buildMessages, buildKeywordPrompt } from './lib/prompt-templates.js';
+import { buildMessages, buildKeywordPrompt, buildExplainMessages } from './lib/prompt-templates.js';
 
 // ─── State ───
 let llmClient = null;
+let explainClient = null;
 let activeEndpointId = null;
 const contextManager = new ContextManager();
 
 // ─── Init ───
 async function init() {
   await initLLMClient();
+  await initExplainClient();
 }
 
 async function initLLMClient() {
@@ -32,7 +34,7 @@ async function initLLMClient() {
       model: s.llmModel || 'gpt-4o-mini',
     };
     await chrome.storage.local.set({ llmEndpoints: [migrated], activeEndpointId: 'default' });
-    llmClient = new LLMClient({ endpoint: migrated.endpoint, apiKey: migrated.apiKey, model: migrated.model });
+    llmClient = new LLMClient({ endpoint: migrated.endpoint, apiKey: migrated.apiKey, model: migrated.model, maxRetries: 3, timeoutMs: 30_000 });
     activeEndpointId = 'default';
     return;
   }
@@ -41,7 +43,7 @@ async function initLLMClient() {
   let ep = endpoints.find(e => e.id === activeEndpointId) || endpoints[0] || null;
   if (ep && ep.apiKey) {
     activeEndpointId = ep.id;
-    llmClient = new LLMClient({ endpoint: ep.endpoint, apiKey: ep.apiKey, model: ep.model });
+    llmClient = new LLMClient({ endpoint: ep.endpoint, apiKey: ep.apiKey, model: ep.model, maxRetries: 3, timeoutMs: 30_000 });
   } else {
     llmClient = null;
     activeEndpointId = null;
@@ -52,6 +54,23 @@ function extractDomain(url) {
   try {
     return new URL(url).hostname.replace(/^api\./, '');
   } catch { return 'unknown'; }
+}
+
+async function initExplainClient() {
+  const s = await chrome.storage.local.get(['explainEndpointId', 'llmEndpoints']);
+  const endpoints = s.llmEndpoints || [];
+  const explainId = s.explainEndpointId;
+
+  if (explainId) {
+    const ep = endpoints.find(e => e.id === explainId);
+    if (ep && ep.apiKey) {
+      explainClient = new LLMClient({ endpoint: ep.endpoint, apiKey: ep.apiKey, model: ep.model, maxRetries: 3, timeoutMs: 30_000 });
+      return;
+    }
+  }
+
+  // Fall back to translation endpoint
+  explainClient = llmClient;
 }
 
 init();
@@ -116,6 +135,7 @@ chrome.runtime.onConnect.addListener(port => {
     if (msg.action !== 'translate') return;
 
     abortCtrl = new AbortController();
+    let retryCount = 0;
 
     try {
       const { text, mode, intent, targetLang } = msg;
@@ -168,13 +188,22 @@ chrome.runtime.onConnect.addListener(port => {
       // Stream response
       let full = '';
       let tokenUsage = null;
+      const startTime = performance.now();
+      const clientConfig = llmClient.getConfig();
+
       for await (const chunk of llmClient.chatStream(messages, {
         signal: abortCtrl.signal,
         onUsage: (u) => { tokenUsage = u; },
+        onRetry: (n) => {
+          retryCount = n;
+          try { port.postMessage({ type: 'retry', attempt: n }); } catch {}
+        },
       })) {
         full += chunk;
         port.postMessage({ type: 'chunk', content: chunk });
       }
+
+      const latency = Math.round(performance.now() - startTime);
 
       // Record source sentence (not the full translation — saves tokens)
       const shouldUpdate = await contextManager.addSentence(tabId, detected, text);
@@ -183,17 +212,165 @@ chrome.runtime.onConnect.addListener(port => {
       const systemPromptChars = messages[0]?.content?.length || 0;
       recordUsage(mode, text.length, full.length, systemPromptChars, tokenUsage);
 
-      // Send shared keywords to frontend for display
-      const currentKeywords = await contextManager.getKeywords(tabId);
-      port.postMessage({ type: 'done', content: full, keywords: currentKeywords });
+      // Send shared keywords to frontend for display (reuse already-fetched keywords)
+      port.postMessage({
+        type: 'done',
+        content: full,
+        keywords,
+        meta: {
+          model: clientConfig.model,
+          endpoint: clientConfig.endpoint,
+          latency,
+          retries: retryCount,
+          tokens: tokenUsage ? {
+            input: tokenUsage.prompt_tokens || 0,
+            output: tokenUsage.completion_tokens || 0,
+            cached: tokenUsage.prompt_tokens_details?.cached_tokens || 0,
+          } : null,
+        },
+      });
 
       // Background keyword update (non-blocking, uses all sentences across intents)
       if (shouldUpdate && llmClient) {
         updateKeywords(tabId, false, targetLang).catch(() => {});
       }
     } catch (e) {
-      if (e.name !== 'AbortError') {
-        port.postMessage({ type: 'error', error: e.message });
+      if (e.name === 'AbortError' && !e._timeout) {
+        // User-initiated cancel — silent
+      } else {
+        const msg = e._timeout
+          ? 'Request timed out. Please check your network connection and try again.'
+          : e.message;
+        const clientConfig = llmClient?.getConfig();
+        port.postMessage({
+          type: 'error',
+          error: msg,
+          meta: clientConfig ? {
+            model: clientConfig.model,
+            endpoint: clientConfig.endpoint,
+            retries: retryCount,
+          } : null,
+        });
+      }
+    }
+  });
+});
+
+// ─── Port-based streaming for Explain mode ───
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== 'explanation') return;
+
+  const tabId = port.sender?.tab?.id;
+  let abortCtrl = null;
+
+  port.onDisconnect.addListener(() => {
+    if (abortCtrl) abortCtrl.abort();
+  });
+
+  port.onMessage.addListener(async msg => {
+    if (msg.action !== 'explain') return;
+
+    abortCtrl = new AbortController();
+    let retryCount = 0;
+
+    try {
+      const { text, question, targetLang } = msg;
+      const client = explainClient || llmClient;
+
+      if (!client) {
+        port.postMessage({ type: 'error', error: 'LLM not configured. Please set up your API in Settings.' });
+        return;
+      }
+
+      // Read settings
+      const s = await chrome.storage.local.get([
+        'contextHistoryLimit', 'userProfile',
+        'customPrompt_explain', 'explainThinkingMode',
+      ]);
+      const profile = s.userProfile || '';
+      const customPrompt = s.customPrompt_explain || '';
+      const thinkingEnabled = s.explainThinkingMode || false;
+
+      // Get context
+      const limit = s.contextHistoryLimit || 10;
+      const [keywords, sentences, history] = await Promise.all([
+        contextManager.getKeywords(tabId),
+        contextManager.getSentences(tabId, 'meaning', limit),
+        contextManager.getExplainHistory(tabId),
+      ]);
+      const context = { keywords, sentences };
+
+      // Build messages with conversation history
+      const messages = buildExplainMessages(text, question, targetLang, context, profile, customPrompt, history);
+
+      // Stream response
+      let full = '';
+      let thinkingFull = '';
+      let tokenUsage = null;
+      const startTime = performance.now();
+      const clientConfig = client.getConfig();
+
+      for await (const chunk of client.chatStream(messages, {
+        signal: abortCtrl.signal,
+        onUsage: (u) => { tokenUsage = u; },
+        onThinking: thinkingEnabled ? (t) => {
+          thinkingFull += t;
+          port.postMessage({ type: 'thinking', content: t });
+        } : null,
+        onRetry: (n) => {
+          retryCount = n;
+          try { port.postMessage({ type: 'retry', attempt: n }); } catch {}
+        },
+      })) {
+        full += chunk;
+        port.postMessage({ type: 'chunk', content: chunk });
+      }
+
+      const latency = Math.round(performance.now() - startTime);
+
+      // Record conversation turns (batch write)
+      await contextManager.addExplainTurns(tabId, [
+        { role: 'user', content: question || 'Explain this text' },
+        { role: 'assistant', content: full },
+      ]);
+
+      // Record usage
+      const systemPromptChars = messages[0]?.content?.length || 0;
+      recordUsage('explain', text.length, full.length, systemPromptChars, tokenUsage);
+
+      port.postMessage({
+        type: 'done',
+        content: full,
+        thinking: thinkingFull,
+        meta: {
+          model: clientConfig.model,
+          endpoint: clientConfig.endpoint,
+          latency,
+          retries: retryCount,
+          tokens: tokenUsage ? {
+            input: tokenUsage.prompt_tokens || 0,
+            output: tokenUsage.completion_tokens || 0,
+            cached: tokenUsage.prompt_tokens_details?.cached_tokens || 0,
+          } : null,
+        },
+      });
+    } catch (e) {
+      if (e.name === 'AbortError' && !e._timeout) {
+        // User-initiated cancel — silent
+      } else {
+        const msg = e._timeout
+          ? 'Request timed out. Please check your network connection and try again.'
+          : e.message;
+        const errClientConfig = client?.getConfig?.();
+        port.postMessage({
+          type: 'error',
+          error: msg,
+          meta: errClientConfig ? {
+            model: errClientConfig.model,
+            endpoint: errClientConfig.endpoint,
+            retries: retryCount,
+          } : null,
+        });
       }
     }
   });
@@ -203,9 +380,8 @@ chrome.runtime.onConnect.addListener(port => {
 async function updateKeywords(tabId, force = false, targetLang = 'zh') {
   if (!llmClient) return;
 
-  // Read configurable interval to determine how many sentences to include
-  const cfg = await chrome.storage.local.get('keywordUpdateInterval');
-  const interval = cfg.keywordUpdateInterval || 10;
+  // Use cached config (shared with ContextManager)
+  const interval = await contextManager._getConfig('keywordUpdateInterval', 10);
 
   const [sentences, existingKeywords] = await Promise.all([
     contextManager.getAllSentences(tabId, interval),
@@ -266,7 +442,7 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
   chrome.storage.local.get(dayKey, (result) => {
     const data = result[dayKey] || {
       count: 0, inputChars: 0, outputChars: 0,
-      quickCount: 0, agentCount: 0, deepCount: 0,
+      quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0,
       inputTokens: 0, outputTokens: 0, cachedTokens: 0,
     };
     data.count++;
@@ -275,6 +451,7 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
     if (mode === 'quick') data.quickCount++;
     else if (mode === 'agent') data.agentCount++;
     else if (mode === 'deep') data.deepCount++;
+    else if (mode === 'explain') data.explainCount = (data.explainCount || 0) + 1;
     data.inputTokens = (data.inputTokens || 0) + inputTokens;
     data.outputTokens = (data.outputTokens || 0) + outputTokens;
     data.cachedTokens = (data.cachedTokens || 0) + cachedTokens;
@@ -323,7 +500,7 @@ async function getUsageStats(query = {}) {
     }
   }
 
-  const dayMap = {};     // { date: { count, inputChars, outputChars, quickCount, agentCount, deepCount, inputTokens, outputTokens, cachedTokens } }
+  const dayMap = {};     // { date: { count, inputChars, outputChars, quickCount, agentCount, deepCount, explainCount, inputTokens, outputTokens, cachedTokens } }
   const modelDayMap = {}; // { date: { modelName: { count, inputChars, outputChars, endpoint, inputTokens, outputTokens, cachedTokens } } }
   const legacyDates = new Set(); // Track dates that had legacy fields
 
@@ -335,13 +512,14 @@ async function getUsageStats(query = {}) {
     const dayMatch = key.match(/^usage_(\d{4}-\d{2}-\d{2})$/);
     if (dayMatch) {
       const date = dayMatch[1];
-      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
       dayMap[date].count += val.count || 0;
       dayMap[date].inputChars += val.inputChars || 0;
       dayMap[date].outputChars += val.outputChars || 0;
       dayMap[date].quickCount += val.quickCount || 0;
       dayMap[date].agentCount += val.agentCount || 0;
       dayMap[date].deepCount += val.deepCount || 0;
+      dayMap[date].explainCount = (dayMap[date].explainCount || 0) + (val.explainCount || 0);
       dayMap[date].inputTokens += val.inputTokens || 0;
       dayMap[date].outputTokens += val.outputTokens || 0;
       dayMap[date].cachedTokens += val.cachedTokens || 0;
@@ -410,6 +588,7 @@ async function getUsageStats(query = {}) {
       quickCount: dayVal.quickCount || 0,
       agentCount: dayVal.agentCount || 0,
       deepCount: dayVal.deepCount || 0,
+      explainCount: dayVal.explainCount || 0,
       inputTokens: dayVal.inputTokens || 0,
       outputTokens: dayVal.outputTokens || 0,
       cachedTokens: dayVal.cachedTokens || 0,
@@ -446,7 +625,7 @@ async function getUsageStats(query = {}) {
   // Merge into final stats array
   const stats = [];
   for (const date of dates) {
-    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
     let models = modelDayMap[date] || {};
 
     // If filtering by model, restrict models and recalculate day totals from model data
@@ -523,7 +702,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     case 'SETTINGS_UPDATED':
-      initLLMClient().then(() => sendResponse({ success: true }));
+      contextManager.invalidateConfigCache();
+      initLLMClient().then(() => initExplainClient()).then(() => sendResponse({ success: true }));
       return true;
 
     case 'SET_ACTIVE_ENDPOINT':
@@ -576,6 +756,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
 
+    case 'CLEAR_EXPLAIN_HISTORY': {
+      const tid = _sender.tab?.id;
+      if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
+      contextManager.clearExplainHistory(tid)
+        .then(() => sendResponse({ success: true }))
+        .catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+
+    case 'GET_EXPLAIN_HISTORY': {
+      const tid = _sender.tab?.id;
+      if (!tid) { sendResponse({ success: false, error: 'No tab context' }); return true; }
+      contextManager.getExplainHistory(tid)
+        .then(history => sendResponse({ success: true, data: { history } }))
+        .catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+
     default:
       sendResponse({ success: false, error: 'Unknown message type' });
       return false;
@@ -589,6 +787,8 @@ async function testLLM(settings) {
       endpoint: settings.llmEndpoint,
       apiKey: settings.llmApiKey,
       model: settings.llmModel,
+      maxRetries: 2,
+      timeoutMs: 15_000,
     });
     const { content: result } = await client.chat(
       [{ role: 'user', content: 'Say "OK" in one word.' }],
