@@ -781,6 +781,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 // ─── Helpers ───
+/**
+ * 测试 LLM 连接是否可用，发送一条简短提示并验证能否收到响应
+ * @param {Object} settings - LLM 连接配置
+ * @param {string} settings.llmEndpoint - LLM API 端点地址
+ * @param {string} settings.llmApiKey - API 密钥
+ * @param {string} settings.llmModel - 模型名称
+ * @returns {Promise<{success: true, data: string} | {success: false, error: string>} 连接成功时返回响应内容，失败时返回错误信息
+ */
 async function testLLM(settings) {
   try {
     const client = new LLMClient({

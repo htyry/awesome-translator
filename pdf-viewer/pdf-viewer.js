@@ -21,6 +21,10 @@
   const fitBtn = document.getElementById('pvFitBtn');
   const openBtn = document.getElementById('pvOpenBtn');
   const welcomeOpenBtn = document.getElementById('pvWelcomeOpenBtn');
+  const outlineBtn = document.getElementById('pvOutlineBtn');
+  const outlineSidebar = document.getElementById('pvOutlineSidebar');
+  const outlineContent = document.getElementById('pvOutlineContent');
+  const outlineCloseBtn = document.getElementById('pvOutlineCloseBtn');
 
   // ─── State ───
   let pdfDoc = null;
@@ -29,6 +33,9 @@
   let scale = 1.0;
   let rendering = false;
   let pendingPage = null;
+  let outlineVisible = false;
+  let outlineItems = [];     // cached outline tree from PDF.js
+  let activeOutlineEl = null; // currently highlighted outline item element
   const ZOOM_STEP = 0.15;
   const ZOOM_MIN = 0.3;
   const ZOOM_MAX = 4.0;
@@ -124,6 +131,10 @@
       // Render first page
       await renderPage(currentPage);
       setStatus('Page 1 of ' + totalPages);
+
+      // Load outline/bookmarks
+      outlineBtn.disabled = false;
+      await loadOutline();
     } catch (err) {
       setStatus('Failed to load PDF: ' + err.message);
       console.error('PDF load error:', err);
@@ -297,6 +308,7 @@
       const page = await pdfDoc.getPage(currentPage);
       const viewport = page.getViewport({ scale: 1 });
       const containerWidth = container.clientWidth - 40; // padding
+      if (containerWidth <= 0) return;
       scale = containerWidth / viewport.width;
       scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale));
       scale = Math.round(scale * 100) / 100;
@@ -312,6 +324,143 @@
     const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     setZoom(scale + delta);
   }, { passive: false });
+
+  // ─── Outline / Bookmarks Sidebar ───
+  outlineBtn.addEventListener('click', toggleOutline);
+  outlineCloseBtn.addEventListener('click', () => toggleOutline(false));
+
+  function toggleOutline(forceState) {
+    outlineVisible = typeof forceState === 'boolean' ? forceState : !outlineVisible;
+    outlineSidebar.classList.toggle('pv-outline-hidden', !outlineVisible);
+    outlineBtn.classList.toggle('pv-btn-active', outlineVisible);
+    // Re-fit viewer after layout change
+    if (pdfDoc) {
+      setTimeout(() => fitToWidth(), 220); // after CSS transition
+    }
+  }
+
+  async function loadOutline() {
+    if (!pdfDoc) return;
+    try {
+      outlineItems = await pdfDoc.getOutline();
+    } catch (err) {
+      console.warn('Failed to load outline:', err);
+      outlineItems = null;
+    }
+    renderOutline();
+  }
+
+  function renderOutline() {
+    outlineContent.innerHTML = '';
+    if (!outlineItems || outlineItems.length === 0) {
+      // Empty state
+      const empty = document.createElement('div');
+      empty.className = 'pv-outline-empty';
+      empty.innerHTML = `
+        <div class="pv-outline-empty-icon">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <rect x="4" y="2" width="24" height="28" rx="2" stroke="#bbb" stroke-width="1.5"/>
+            <path d="M9 10h14M9 15h10M9 20h12" stroke="#ccc" stroke-width="1" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="pv-outline-empty-text">No outline or bookmarks in this PDF</span>
+      `;
+      outlineContent.appendChild(empty);
+      return;
+    }
+
+    const root = buildOutlineTree(outlineItems, 0);
+    outlineContent.appendChild(root);
+  }
+
+  /**
+   * Recursively build outline tree DOM.
+   * Each item: { title, dest, url, items: [...] }
+   * Returns a DocumentFragment or container element.
+   */
+  function buildOutlineTree(items, depth) {
+    const MAX_DEPTH = 3; // levels 0-3 = 4 levels total
+    const frag = document.createDocumentFragment();
+
+    for (const item of items) {
+      const hasChildren = item.items && item.items.length > 0 && depth < MAX_DEPTH;
+
+      // Row container
+      const row = document.createElement('div');
+      row.className = 'pv-outline-item';
+      row.style.paddingLeft = (depth * 16) + 'px';
+
+      // Toggle arrow
+      const toggle = document.createElement('button');
+      toggle.className = 'pv-outline-toggle' + (hasChildren ? ' pv-toggle-collapsed' : ' pv-toggle-leaf');
+      toggle.innerHTML = hasChildren
+        ? '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 1.5 7.5 5 2.5 8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : '';
+      row.appendChild(toggle);
+
+      // Label
+      const label = document.createElement('span');
+      label.className = 'pv-outline-label';
+      label.textContent = item.title;
+      row.appendChild(label);
+
+      // Click to navigate
+      row.addEventListener('click', () => navigateToOutlineItem(item, row));
+
+      frag.appendChild(row);
+
+      // Children — default collapsed, max 4 levels
+      if (hasChildren) {
+        const childrenEl = document.createElement('div');
+        childrenEl.className = 'pv-outline-children pv-children-collapsed';
+        const childFrag = buildOutlineTree(item.items, depth + 1);
+        childrenEl.appendChild(childFrag);
+        frag.appendChild(childrenEl);
+
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const collapsed = toggle.classList.toggle('pv-toggle-collapsed');
+          childrenEl.classList.toggle('pv-children-collapsed', collapsed);
+        });
+      }
+    }
+
+    return frag;
+  }
+
+  /**
+   * Navigate to the page/position referenced by an outline item.
+   * Outline destinations can be:
+   *  - A string (named destination) → resolve via pdfDoc.getDestination()
+   *  - An array (explicit destination) → use directly
+   *  The first element of the dest array is a page ref object.
+   */
+  async function navigateToOutlineItem(item, rowEl) {
+    if (!pdfDoc) return;
+
+    // Highlight active item
+    if (activeOutlineEl) activeOutlineEl.classList.remove('pv-outline-active');
+    rowEl.classList.add('pv-outline-active');
+    activeOutlineEl = rowEl;
+
+    try {
+      let dest = item.dest;
+      if (typeof dest === 'string') {
+        dest = await pdfDoc.getDestination(dest);
+      }
+      if (!dest || !dest[0]) return;
+
+      const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+      if (pageIndex < 0 || pageIndex >= totalPages) return;
+
+      const pageNum = pageIndex + 1;
+      if (pageNum !== currentPage) {
+        goToPage(pageNum);
+      }
+    } catch (err) {
+      console.warn('Failed to navigate outline item:', err);
+    }
+  }
 
   // ─── Helpers ───
   function setStatus(text) {
