@@ -3,9 +3,10 @@
 
 import { LLMClient } from './lib/llm-client.js';
 import { freeTranslate } from './lib/free-translate.js';
-import { classifyIntent } from './lib/intent-classifier.js';
+import { classifySubtype } from './lib/intent-classifier.js';
 import { ContextManager } from './lib/context-manager.js';
 import { buildMessages, buildKeywordPrompt, buildExplainMessages } from './lib/prompt-templates.js';
+// Action labels for usage tracking: translate | learn | ask
 
 // ─── State ───
 let llmClient = null;
@@ -146,59 +147,58 @@ chrome.runtime.onConnect.addListener(port => {
   });
 
   port.onMessage.addListener(async msg => {
-    if (msg.action !== 'translate') return;
+    if (msg.action !== 'translate' && msg.action !== 'learn') return;
 
     abortCtrl = new AbortController();
     let retryCount = 0;
 
     try {
-      const { text, mode, intent, targetLang } = msg;
+      const { text, action, targetLang } = msg;
+      // subtype: for 'learn' → 'word' | 'sentence'; auto-classified if not provided
+      const subtype = msg.subtype || (action === 'learn' ? classifySubtype(text) : undefined);
 
-      // ── Quick mode: free API ──
-      if (mode === 'quick') {
-        const result = await freeTranslate(text, targetLang);
-        port.postMessage({ type: 'result', content: result });
-        recordUsage('quick', text.length, result.length);
-        return;
+      // ── translate without LLM: fall back to free API ──
+      if (action === 'translate') {
+        await waitForInit();
+        if (!llmClient) {
+          const result = await freeTranslate(text, targetLang);
+          port.postMessage({ type: 'result', content: result });
+          recordUsage('quick', text.length, result.length);
+          return;
+        }
       }
 
-      // ── Agent / Deep: LLM required ──
+      // ── learn / translate with LLM ──
       await waitForInit();
       if (!llmClient) {
-        port.postMessage({
-          type: 'error',
-          error: 'LLM not configured. Please set up your API in Settings.',
-        });
+        port.postMessage({ type: 'error', error: 'LLM not configured. Please set up your API in Settings.' });
         return;
       }
 
-      // Detect intent (auto) or use specified
-      const detected = intent || classifyIntent(text);
-      port.postMessage({ type: 'intent', intent: detected });
+      // Emit detected subtype for learn action
+      if (action === 'learn') {
+        port.postMessage({ type: 'subtype', subtype });
+      }
 
-      // Build context: keywords + recent sentences
-      const s = await chrome.storage.local.get([
-        'contextHistoryLimit', 'userProfile',
-        'customPrompt_agent_meaning', 'customPrompt_agent_grammar', 'customPrompt_deep',
-      ]);
+      // Build context
+      const s = await chrome.storage.local.get(['contextHistoryLimit', 'userProfile', 'customPrompt_translate', 'customPrompt_learn', 'customPrompt_ask']);
       const limit = s.contextHistoryLimit || 10;
       const profile = s.userProfile || '';
       const customPrompts = {
-        agent_meaning: s.customPrompt_agent_meaning || '',
-        agent_grammar: s.customPrompt_agent_grammar || '',
-        deep: s.customPrompt_deep || '',
+        translate: s.customPrompt_translate || '',
+        learn:     s.customPrompt_learn || '',
+        ask:       s.customPrompt_ask || '',
       };
       Object.keys(customPrompts).forEach(k => { if (!customPrompts[k]) delete customPrompts[k]; });
 
+      // Only translate action uses domain keyword context
       const [keywords, sentences] = await Promise.all([
-        contextManager.getKeywords(tabId),
-        contextManager.getSentences(tabId, detected, limit),
+        action === 'translate' ? contextManager.getKeywords(tabId) : Promise.resolve([]),
+        action === 'translate' ? contextManager.getSentences(tabId, 'translate', limit) : Promise.resolve([]),
       ]);
 
       const context = { keywords, sentences };
-
-      // Build LLM messages (system prompt has context embedded)
-      const messages = buildMessages(mode, detected, text, targetLang, context, profile, customPrompts);
+      const messages = buildMessages(action, subtype, text, targetLang, context, profile, customPrompts);
 
       // Stream response
       let full = '';
@@ -208,8 +208,7 @@ chrome.runtime.onConnect.addListener(port => {
 
       for await (const chunk of llmClient.chatStream(messages, {
         signal: abortCtrl.signal,
-        // Deep analysis can be verbose; use higher token limit
-        maxTokens: mode === 'deep' ? 3072 : undefined,
+        maxTokens: action === 'learn' ? 1024 : undefined,
         onUsage: (u) => { tokenUsage = u; },
         onRetry: (n) => {
           retryCount = n;
@@ -222,18 +221,19 @@ chrome.runtime.onConnect.addListener(port => {
 
       const latency = Math.round(performance.now() - startTime);
 
-      // Record source sentence (not the full translation — saves tokens)
-      const shouldUpdate = await contextManager.addSentence(tabId, detected, text);
+      // Only record context sentences for translate (domain awareness)
+      let shouldUpdate = false;
+      if (action === 'translate') {
+        shouldUpdate = await contextManager.addSentence(tabId, 'translate', text);
+      }
 
-      // Record usage with token data
       const systemPromptChars = messages[0]?.content?.length || 0;
-      recordUsage(mode, text.length, full.length, systemPromptChars, tokenUsage);
+      recordUsage(action, text.length, full.length, systemPromptChars, tokenUsage);
 
-      // Send shared keywords to frontend for display (reuse already-fetched keywords)
       port.postMessage({
         type: 'done',
         content: full,
-        keywords,
+        keywords: action === 'translate' ? keywords : undefined,
         meta: {
           model: clientConfig.model,
           endpoint: clientConfig.endpoint,
@@ -247,7 +247,6 @@ chrome.runtime.onConnect.addListener(port => {
         },
       });
 
-      // Background keyword update (non-blocking, uses all sentences across intents)
       if (shouldUpdate && llmClient) {
         updateKeywords(tabId, false, targetLang).catch(() => {});
       }
@@ -255,18 +254,12 @@ chrome.runtime.onConnect.addListener(port => {
       if (e.name === 'AbortError' && !e._timeout) {
         // User-initiated cancel — silent
       } else {
-        const msg = e._timeout
-          ? 'Request timed out. Please check your network connection and try again.'
-          : e.message;
+        const errMsg = e._timeout ? 'Request timed out. Please check your network connection and try again.' : e.message;
         const clientConfig = llmClient?.getConfig();
         port.postMessage({
           type: 'error',
-          error: msg,
-          meta: clientConfig ? {
-            model: clientConfig.model,
-            endpoint: clientConfig.endpoint,
-            retries: retryCount,
-          } : null,
+          error: errMsg,
+          meta: clientConfig ? { model: clientConfig.model, endpoint: clientConfig.endpoint, retries: retryCount } : null,
         });
       }
     }
@@ -313,7 +306,7 @@ chrome.runtime.onConnect.addListener(port => {
       const limit = s.contextHistoryLimit || 10;
       const [keywords, sentences, history] = await Promise.all([
         contextManager.getKeywords(tabId),
-        contextManager.getSentences(tabId, 'meaning', limit),
+        contextManager.getSentences(tabId, 'translate', limit),
         contextManager.getExplainHistory(tabId),
       ]);
       const context = { keywords, sentences };
@@ -475,14 +468,14 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
   // ── Daily totals (serialized via per-key promise chain) ──
   const dayKey = usageKey(today);
   _enqueueUsage(dayKey, (prev) => {
-    const data = prev || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+    const data = prev || { count: 0, inputChars: 0, outputChars: 0, translateCount: 0, learnCount: 0, askCount: 0, quickCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
     data.count++;
     data.inputChars += totalInputChars;
     data.outputChars += outputChars;
-    if (mode === 'quick') data.quickCount++;
-    else if (mode === 'agent') data.agentCount++;
-    else if (mode === 'deep') data.deepCount++;
-    else if (mode === 'explain') data.explainCount = (data.explainCount || 0) + 1;
+    if (mode === 'translate') data.translateCount = (data.translateCount || 0) + 1;
+    else if (mode === 'learn') data.learnCount = (data.learnCount || 0) + 1;
+    else if (mode === 'ask') data.askCount = (data.askCount || 0) + 1;
+    else if (mode === 'quick') data.quickCount = (data.quickCount || 0) + 1;
     data.inputTokens = (data.inputTokens || 0) + inputTokens;
     data.outputTokens = (data.outputTokens || 0) + outputTokens;
     data.cachedTokens = (data.cachedTokens || 0) + cachedTokens;
@@ -565,14 +558,15 @@ async function getUsageStats(query = {}) {
     const dayMatch = key.match(/^usage_(\d{4}-\d{2}-\d{2})$/);
     if (dayMatch) {
       const date = dayMatch[1];
-      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+      if (!dayMap[date]) dayMap[date] = { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, translateCount: 0, learnCount: 0, askCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
       dayMap[date].count += val.count || 0;
       dayMap[date].inputChars += val.inputChars || 0;
       dayMap[date].outputChars += val.outputChars || 0;
       dayMap[date].quickCount += val.quickCount || 0;
-      dayMap[date].agentCount += val.agentCount || 0;
-      dayMap[date].deepCount += val.deepCount || 0;
-      dayMap[date].explainCount = (dayMap[date].explainCount || 0) + (val.explainCount || 0);
+      // New action fields; fall back to legacy field names for historical data
+      dayMap[date].translateCount += (val.translateCount || 0) + (val.agentCount || 0);
+      dayMap[date].learnCount += (val.learnCount || 0) + (val.deepCount || 0);
+      dayMap[date].askCount += (val.askCount || 0) + (val.explainCount || 0);
       dayMap[date].inputTokens += val.inputTokens || 0;
       dayMap[date].outputTokens += val.outputTokens || 0;
       dayMap[date].cachedTokens += val.cachedTokens || 0;
@@ -623,7 +617,7 @@ async function getUsageStats(query = {}) {
       const mKey = modelUsageKey(date, mName);
       if (!all[mKey] && !toWrite[mKey] && !modelDayMap[date][mName]) {
         modelDayMap[date][mName] = {
-          count: (dayVal.agentCount || 0) + (dayVal.deepCount || 0),
+          count: (dayVal.translateCount || 0) + (dayVal.learnCount || 0) + (dayVal.askCount || 0) + (dayVal.agentCount || 0) + (dayVal.deepCount || 0) + (dayVal.explainCount || 0),
           inputChars: dayVal.inputChars || 0,
           outputChars: dayVal.outputChars || 0,
           endpoint: dayVal.llmEndpoint || '',
@@ -639,9 +633,9 @@ async function getUsageStats(query = {}) {
       inputChars: dayVal.inputChars || 0,
       outputChars: dayVal.outputChars || 0,
       quickCount: dayVal.quickCount || 0,
-      agentCount: dayVal.agentCount || 0,
-      deepCount: dayVal.deepCount || 0,
-      explainCount: dayVal.explainCount || 0,
+      translateCount: dayVal.translateCount || 0,
+      learnCount: dayVal.learnCount || 0,
+      askCount: dayVal.askCount || 0,
       inputTokens: dayVal.inputTokens || 0,
       outputTokens: dayVal.outputTokens || 0,
       cachedTokens: dayVal.cachedTokens || 0,
@@ -678,7 +672,7 @@ async function getUsageStats(query = {}) {
   // Merge into final stats array
   const stats = [];
   for (const date of dates) {
-    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+    const day = dayMap[date] || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, translateCount: 0, learnCount: 0, askCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
     let models = modelDayMap[date] || {};
 
     // If filtering by model, restrict models and recalculate day totals from model data
@@ -692,8 +686,9 @@ async function getUsageStats(query = {}) {
         inputChars: mData.inputChars || 0,
         outputChars: mData.outputChars || 0,
         quickCount: 0,
-        agentCount: mData.count || 0,
-        deepCount: 0,
+        translateCount: mData.count || 0,
+        learnCount: 0,
+        askCount: 0,
         inputTokens: mData.inputTokens || 0,
         outputTokens: mData.outputTokens || 0,
         cachedTokens: mData.cachedTokens || 0,

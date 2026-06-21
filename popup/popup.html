@@ -10,17 +10,17 @@
   <div class="popup-container">
     <header class="header">
       <h1 class="title">Awesome Translator</h1>
-      <div class="mode-tabs">
-        <button class="mode-tab active" data-mode="quick">Quick</button>
-        <button class="mode-tab" data-mode="agent">Context</button>
-        <button class="mode-tab" data-mode="deep">Deep</button>
+      <div class="action-tabs">
+        <button class="action-tab active" data-action="translate">译</button>
+        <button class="action-tab" data-action="learn">学</button>
+        <button class="action-tab" data-action="ask">问</button>
       </div>
     </header>
 
     <div class="input-section">
       <textarea
         id="sourceText"
-        placeholder="Enter text to translate..."
+        placeholder="输入要翻译或分析的文本..."
         rows="2"
       ></textarea>
 
@@ -37,21 +37,13 @@
       </div>
     </div>
 
-    <div id="intentRow" class="intent-row hidden">
-      <span class="intent-badge hidden" id="intentBadge"></span>
-      <div class="intent-switch hidden" id="intentSwitch">
-        <span class="intent-tag active" data-intent="meaning">Meaning</span>
-        <span class="intent-tag" data-intent="grammar">Grammar</span>
-      </div>
-    </div>
-
     <div id="keywordsBar" class="keywords-bar">
       <span class="keywords-label">Domain</span>
-      <span class="keywords-empty">translating...</span>
+      <span class="keywords-empty">翻译准备中...</span>
     </div>
 
     <button id="translateBtn" class="translate-btn primary-btn">
-      Translate
+      执行
     </button>
 
     <div class="output-section">
