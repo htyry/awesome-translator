@@ -3,7 +3,7 @@
   "name": "Awesome Translator",
   "version": "2.0.0",
   "description": "AI-powered translation agent with context memory and deep word analysis",
-  "permissions": ["activeTab", "storage", "contextMenus"],
+  "permissions": ["activeTab", "storage", "contextMenus", "webNavigation"],
   "host_permissions": [
     "https://translate.googleapis.com/*"
   ],
@@ -44,6 +44,6 @@
     }
   ],
   "web_accessible_resources": [
-    { "resources": ["assets/*", "stats/*", "lib/pdf.min.mjs", "lib/pdf.worker.min.mjs"], "matches": ["<all_urls>"] }
+    { "resources": ["assets/*", "stats/*", "lib/ui-utils.js", "lib/pdf.min.mjs", "lib/pdf.worker.min.mjs"], "matches": ["<all_urls>"] }
   ]
 }

@@ -2,8 +2,11 @@
 // In-page translation panel with mode switching, intent detection, streaming, TTS
 // Plus Explain mode with conversation history and thinking display
 
-(function () {
+(async function () {
   'use strict';
+
+  // ═══ Shared imports ═══
+  const { escapeHtml, formatContent, buildMetaHtml } = await import(chrome.runtime.getURL('lib/ui-utils.js'));
 
   // ═══ Constants ═══
   const MODES = { QUICK: 'quick', AGENT: 'agent', DEEP: 'deep' };
@@ -492,9 +495,10 @@
             break;
 
           case 'chunk':
-            if (resultEl.querySelector('.at-loading')) resultEl.innerHTML = '';
+            if (resultEl.querySelector('.at-loading')) resultEl.textContent = '';
             full += msg.content;
-            resultEl.innerHTML = formatContent(full);
+            // Use textContent during streaming for O(1) per-chunk performance
+            resultEl.textContent = full;
             resultEl.className = 'at-result at-streaming';
             resultEl.scrollTop = resultEl.scrollHeight;
             break;
@@ -729,9 +733,9 @@
           break;
 
         case 'chunk':
-          if (resultEl.querySelector('.at-loading')) resultEl.innerHTML = '';
+          if (resultEl.querySelector('.at-loading')) resultEl.textContent = '';
           full += msg.content;
-          resultEl.innerHTML = formatContent(full);
+          resultEl.textContent = full;
           messagesEl.scrollTop = messagesEl.scrollHeight;
           break;
 
@@ -780,37 +784,6 @@
 
   function disconnectExplainPort() {
     if (explainPort) { try { explainPort.disconnect(); } catch {} explainPort = null; }
-  }
-
-  // ─── Format content (markdown + Terms section) ───
-  function formatContent(text) {
-    let html = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/^## (.+)$/gm, '<div class="at-h2">$1</div>')
-      .replace(/^### (.+)$/gm, '<div class="at-h3">$1</div>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`([^`]+)`/g, '<code class="at-code">$1</code>')
-      .replace(/\n/g, '<br>');
-
-    // Render **Terms** section as a styled card
-    html = html.replace(
-      /(<strong>Terms<\/strong><br>)([\s\S]*?)(?=<br><br>|<br><strong>|$)/,
-      (_, header, body) => {
-        const items = body
-          .split(/<br>\s*/)
-          .map(line => line.trim())
-          .filter(line => line && line.startsWith('1.') || line.startsWith('2.') || line.startsWith('3.') || line.startsWith('4.') || line.startsWith('5.'))
-          .map(line => `<div class="at-term-item">${line.replace(/^\d+\.\s*/, '')}</div>`)
-          .join('');
-        return items
-          ? `${header}<div class="at-terms-card">${items}</div>`
-          : header;
-      }
-    );
-
-    return html;
   }
 
   // ════════════════════════════════════════
@@ -920,36 +893,7 @@
     return { x: px, y: py };
   }
 
-  function escapeHtml(text) {
-    const d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-
   // ─── Request Meta Display ───
-  function buildMetaHtml(meta, success) {
-    if (!meta) return '';
-    const parts = [];
-    if (meta.model) {
-      parts.push(`<span class="at-meta-item at-meta-model" title="${escapeHtml(meta.endpoint || '')}">${escapeHtml(meta.model)}</span>`);
-    }
-    if (meta.latency != null) {
-      const cls = meta.latency < 2000 ? 'at-meta-fast' : meta.latency < 5000 ? 'at-meta-normal' : 'at-meta-slow';
-      parts.push(`<span class="at-meta-item ${cls}">${(meta.latency / 1000).toFixed(1)}s</span>`);
-    }
-    if (meta.retries > 0) {
-      parts.push(`<span class="at-meta-item at-meta-retry">${meta.retries} retry${meta.retries > 1 ? 's' : ''}</span>`);
-    }
-    if (meta.tokens) {
-      const t = meta.tokens;
-      let tokenStr = `${t.input + t.output} tokens`;
-      if (t.cached > 0) tokenStr += ` (${t.cached} cached)`;
-      parts.push(`<span class="at-meta-item at-meta-tokens">${tokenStr}</span>`);
-    }
-    parts.push(`<span class="at-meta-item ${success ? 'at-meta-success' : 'at-meta-fail'}">${success ? 'OK' : 'FAIL'}</span>`);
-    return parts.join('<span class="at-meta-sep">·</span>');
-  }
-
   function showRequestMeta(panelEl, meta, success) {
     const metaEl = panelEl?.querySelector('.at-request-meta');
     if (!metaEl) return;

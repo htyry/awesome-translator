@@ -13,10 +13,20 @@ let explainClient = null;
 let activeEndpointId = null;
 const contextManager = new ContextManager();
 
+// Init promise: ensures callers can await init completion before using LLM
+let _initPromise = null;
+
+function waitForInit() {
+  return _initPromise || Promise.resolve();
+}
+
 // ─── Init ───
 async function init() {
-  await initLLMClient();
-  await initExplainClient();
+  _initPromise = (async () => {
+    await initLLMClient();
+    await initExplainClient();
+  })();
+  await _initPromise;
 }
 
 async function initLLMClient() {
@@ -88,6 +98,10 @@ chrome.tabs.onRemoved.addListener(tabId => contextManager.clearTab(tabId));
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === 'loading') contextManager.clearTab(tabId);
 });
+// SPA navigation: clear context on pushState/replaceState (e.g., Twitter, Notion)
+chrome.webNavigation.onHistoryStateUpdated.addListener(({ tabId }) => {
+  if (tabId) contextManager.clearTab(tabId);
+});
 
 // ─── Context menu ───
 chrome.runtime.onInstalled.addListener(() => {
@@ -149,6 +163,7 @@ chrome.runtime.onConnect.addListener(port => {
       }
 
       // ── Agent / Deep: LLM required ──
+      await waitForInit();
       if (!llmClient) {
         port.postMessage({
           type: 'error',
@@ -275,6 +290,7 @@ chrome.runtime.onConnect.addListener(port => {
 
     try {
       const { text, question, targetLang } = msg;
+      await waitForInit();
       const client = explainClient || llmClient;
 
       if (!client) {
@@ -411,9 +427,7 @@ async function updateKeywords(tabId, force = false, targetLang = 'zh') {
       await contextManager.updateKeywords(tabId, keywords);
 
       // Notify content script about keyword update (shared, no intent)
-      try {
-        chrome.tabs.sendMessage(tabId, { type: 'KEYWORDS_UPDATED', keywords });
-      } catch {}
+      chrome.tabs.sendMessage(tabId, { type: 'KEYWORDS_UPDATED', keywords }, () => { void chrome.runtime.lastError; });
     }
   } catch (e) {
     console.warn('Keyword extraction failed:', e.message);
@@ -427,6 +441,23 @@ async function updateKeywords(tabId, force = false, targetLang = 'zh') {
 function usageKey(date) { return `usage_${date}`; }
 function modelUsageKey(date, model) { return `usage_${date}:${model}`; }
 
+// Serialized update queue per storage key to avoid read-modify-write races
+const _usageQueues = {};
+
+function _enqueueUsage(key, updater) {
+  // Chain promises per key so updates are serialized (no concurrent get/set races)
+  const prev = _usageQueues[key] || Promise.resolve();
+  const next = prev.then(() => new Promise((resolve, reject) => {
+    chrome.storage.local.get(key, (result) => {
+      const data = updater(result[key] || {});
+      chrome.storage.local.set({ [key]: data }, () => {
+        resolve();
+      });
+    });
+  })).catch(() => {});
+  _usageQueues[key] = next;
+}
+
 function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, tokenUsage = null) {
   const today = new Date().toISOString().slice(0, 10);
   const totalInputChars = inputChars + (mode !== 'quick' ? systemPromptChars : 0);
@@ -437,14 +468,10 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
   // OpenAI cached tokens: prompt_tokens_details.cached_tokens
   const cachedTokens = tokenUsage?.prompt_tokens_details?.cached_tokens || 0;
 
-  // Update daily totals (read-modify-write, but each field is additive so safe)
+  // ── Daily totals (serialized via per-key promise chain) ──
   const dayKey = usageKey(today);
-  chrome.storage.local.get(dayKey, (result) => {
-    const data = result[dayKey] || {
-      count: 0, inputChars: 0, outputChars: 0,
-      quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0,
-      inputTokens: 0, outputTokens: 0, cachedTokens: 0,
-    };
+  _enqueueUsage(dayKey, (prev) => {
+    const data = prev || { count: 0, inputChars: 0, outputChars: 0, quickCount: 0, agentCount: 0, deepCount: 0, explainCount: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
     data.count++;
     data.inputChars += totalInputChars;
     data.outputChars += outputChars;
@@ -459,10 +486,10 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
     delete data.models;
     delete data.llmModel;
     delete data.llmEndpoint;
-    chrome.storage.local.set({ [dayKey]: data });
+    return data;
   });
 
-  // Update per-model stats (separate key per model — no cross-model race)
+  // ── Per-model stats (serialized independently) ──
   if (mode !== 'quick') {
     let modelName = 'unknown';
     let endpointUrl = '';
@@ -473,8 +500,8 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
     }
 
     const mKey = modelUsageKey(today, modelName);
-    chrome.storage.local.get(mKey, (result) => {
-      const mData = result[mKey] || { count: 0, inputChars: 0, outputChars: 0, endpoint: endpointUrl, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+    _enqueueUsage(mKey, (prev) => {
+      const mData = prev || { count: 0, inputChars: 0, outputChars: 0, endpoint: endpointUrl, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
       mData.count++;
       mData.inputChars += totalInputChars;
       mData.outputChars += outputChars;
@@ -482,14 +509,36 @@ function recordUsage(mode, inputChars, outputChars, systemPromptChars = 0, token
       mData.inputTokens = (mData.inputTokens || 0) + inputTokens;
       mData.outputTokens = (mData.outputTokens || 0) + outputTokens;
       mData.cachedTokens = (mData.cachedTokens || 0) + cachedTokens;
-      chrome.storage.local.set({ [mKey]: mData });
+      return mData;
     });
   }
 }
 
-async function getUsageStats(query = {}) {
-  const all = await chrome.storage.local.get(null);
+const USAGE_RETENTION_DAYS = 90; // auto-prune usage data older than this
 
+/** Remove usage keys older than the retention window. Fire-and-forget. */
+function cleanupOldUsage() {
+  chrome.storage.local.get(null, (all) => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - USAGE_RETENTION_DAYS);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const toRemove = Object.keys(all).filter(k => {
+      if (!k.startsWith('usage_')) return false;
+      const d = k.slice(6, 16); // "usage_YYYY-MM-DD" or "usage_YYYY-MM-DD:modelName"
+      return d < cutoffStr;
+    });
+    if (toRemove.length > 50) {
+      // Only batch-delete if there's meaningful cleanup to do
+      chrome.storage.local.remove(toRemove);
+    }
+  });
+}
+
+async function getUsageStats(query = {}) {
+  // Trigger background cleanup (fire-and-forget)
+  cleanupOldUsage();
+
+  const all = await chrome.storage.local.get(null);
   // Opportunistic cleanup: remove orphaned ctx: keys for tabs that no longer exist
   const ctxKeys = Object.keys(all).filter(k => k.startsWith('ctx:'));
   if (ctxKeys.length > 0) {
@@ -675,7 +724,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'SAVE_SETTINGS':
       chrome.storage.local.set(message.settings, () => {
         sendResponse({ success: true });
-        init();
+        _initPromise = init();
       });
       return true;
 
@@ -703,12 +752,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'SETTINGS_UPDATED':
       contextManager.invalidateConfigCache();
-      initLLMClient().then(() => initExplainClient()).then(() => sendResponse({ success: true }));
+      _initPromise = init().then(() => sendResponse({ success: true }));
       return true;
 
     case 'SET_ACTIVE_ENDPOINT':
       chrome.storage.local.set({ activeEndpointId: message.endpointId }, () => {
-        initLLMClient().then(() => sendResponse({ success: true }));
+        _initPromise = initLLMClient().then(() => initExplainClient()).then(() => sendResponse({ success: true }));
       });
       return true;
 
@@ -728,9 +777,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .then(kws => {
           sendResponse({ success: true, data: { keywords: kws } });
           // Notify content script of keyword update
-          try {
-            chrome.tabs.sendMessage(tid, { type: 'KEYWORDS_UPDATED', keywords: kws });
-          } catch {}
+          chrome.tabs.sendMessage(tid, { type: 'KEYWORDS_UPDATED', keywords: kws }, () => { void chrome.runtime.lastError; });
         })
         .catch(e => sendResponse({ success: false, error: e.message }));
       return true;
