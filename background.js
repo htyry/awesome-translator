@@ -208,6 +208,8 @@ chrome.runtime.onConnect.addListener(port => {
 
       for await (const chunk of llmClient.chatStream(messages, {
         signal: abortCtrl.signal,
+        // Deep analysis can be verbose; use higher token limit
+        maxTokens: mode === 'deep' ? 3072 : undefined,
         onUsage: (u) => { tokenUsage = u; },
         onRetry: (n) => {
           retryCount = n;
@@ -326,8 +328,10 @@ chrome.runtime.onConnect.addListener(port => {
       const startTime = performance.now();
       const clientConfig = client.getConfig();
 
+      // Use a higher maxTokens for explain mode to prevent truncation
       for await (const chunk of client.chatStream(messages, {
         signal: abortCtrl.signal,
+        maxTokens: 4096,
         onUsage: (u) => { tokenUsage = u; },
         onThinking: thinkingEnabled ? (t) => {
           thinkingFull += t;
@@ -447,7 +451,7 @@ const _usageQueues = {};
 function _enqueueUsage(key, updater) {
   // Chain promises per key so updates are serialized (no concurrent get/set races)
   const prev = _usageQueues[key] || Promise.resolve();
-  const next = prev.then(() => new Promise((resolve, reject) => {
+  const next = prev.then(() => new Promise(resolve => {
     chrome.storage.local.get(key, (result) => {
       const data = updater(result[key] || {});
       chrome.storage.local.set({ [key]: data }, () => {
